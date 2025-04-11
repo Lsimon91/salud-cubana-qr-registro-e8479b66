@@ -14,10 +14,16 @@ const LoginPage = () => {
       
       <LoginForm />
       
-      <p className="mt-8 text-sm text-gray-500 text-center max-w-md">
-        Este sistema es exclusivo para el personal autorizado del sistema de salud.
-        El acceso no autorizado está prohibido y puede ser penalizado según la ley.
-      </p>
+      <div className="mt-8 text-center">
+        <p className="text-sm text-gray-500 max-w-md">
+          Este sistema es exclusivo para el personal autorizado del sistema de salud.
+          El acceso no autorizado está prohibido y puede ser penalizado según la ley.
+        </p>
+        
+        <p className="mt-3 text-xs text-gray-400">
+          <span className="font-medium">Usuario administrador:</span> Admin@host.example.com
+        </p>
+      </div>
     </div>
   );
 };

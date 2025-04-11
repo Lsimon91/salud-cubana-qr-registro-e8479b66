@@ -21,6 +21,10 @@ import {
 } from "@/components/ui/select";
 import { useToast } from '@/hooks/use-toast';
 
+// Admin credentials
+const ADMIN_EMAIL = "Admin@host.example.com";
+const ADMIN_PASSWORD = "1Z2x3c4v";
+
 const LoginForm = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,7 +47,29 @@ const LoginForm = () => {
     
     setLoading(true);
     
-    // Simulated login logic
+    // Check if credentials match admin user
+    if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+      setTimeout(() => {
+        setLoading(false);
+        
+        toast({
+          title: "Inicio de sesión exitoso",
+          description: "Bienvenido/a, Administrador",
+        });
+        
+        // Save admin info to localStorage
+        localStorage.setItem('userRole', 'Administrador');
+        localStorage.setItem('isAuthenticated', 'true');
+        localStorage.setItem('userEmail', email);
+        localStorage.setItem('userName', 'Administrador Principal');
+        
+        // Redirect to dashboard
+        navigate('/dashboard');
+      }, 1000);
+      return;
+    }
+    
+    // Simulated login logic for other users
     setTimeout(() => {
       setLoading(false);
       
@@ -56,6 +82,7 @@ const LoginForm = () => {
       // Save user info to localStorage (in a real app, this would use secure cookies and JWT)
       localStorage.setItem('userRole', role);
       localStorage.setItem('isAuthenticated', 'true');
+      localStorage.setItem('userEmail', email);
       
       // Redirect to dashboard
       navigate('/dashboard');
