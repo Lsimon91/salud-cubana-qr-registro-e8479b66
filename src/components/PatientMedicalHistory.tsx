@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { supabase } from '@/integrations/supabase/client';
 import {
   Table,
   TableBody,
@@ -40,20 +39,22 @@ import {
   UserPlus
 } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
+import { db } from '@/db/localDatabase';
 
 interface MedicalRecord {
-  id: string;
+  id?: number;
+  patient_id: number;
   date: string;
   diagnosis: string;
   treatment: string;
   medications: string;
   notes: string | null;
   doctor_id: string;
-  doctor_name?: string;
+  doctor_name: string;
 }
 
 interface PatientData {
-  id: string;
+  id?: number;
   identity_id: string;
   name: string;
   birth_date: string;
@@ -75,7 +76,7 @@ const PatientMedicalHistory = () => {
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const [creatingNewPatient, setCreatingNewPatient] = useState(false);
-  const [newRecord, setNewRecord] = useState<Omit<MedicalRecord, 'id' | 'doctor_id'>>({
+  const [newRecord, setNewRecord] = useState<Omit<MedicalRecord, 'id' | 'doctor_id' | 'doctor_name' | 'patient_id'>>({
     date: new Date().toISOString().split('T')[0],
     diagnosis: '',
     treatment: '',
@@ -84,7 +85,7 @@ const PatientMedicalHistory = () => {
   });
   const [doctorName, setDoctorName] = useState('');
 
-  // Calculate age from birth date
+  // Calcular edad a partir de la fecha de nacimiento
   const calculateAge = (birthDate: string): number => {
     const today = new Date();
     const birthDateObj = new Date(birthDate);
@@ -96,53 +97,38 @@ const PatientMedicalHistory = () => {
     return age;
   };
 
-  // Check if user is authenticated
+  // Verificar si el usuario está autenticado
   useEffect(() => {
     const checkAuth = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!data.session) {
+      const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
+      if (!isAuthenticated) {
         toast({
           title: "No ha iniciado sesión",
           description: "Debe iniciar sesión para acceder a esta página",
           variant: "destructive",
         });
         navigate('/');
+      } else {
+        // Configurar el nombre del doctor desde el almacenamiento local
+        const userName = localStorage.getItem('userName');
+        if (userName) {
+          setDoctorName(userName);
+        }
       }
     };
 
     checkAuth();
   }, [navigate, toast]);
 
-  // Get doctor name
-  useEffect(() => {
-    const getDoctorName = async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (sessionData.session) {
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', sessionData.session.user.id)
-          .single();
-          
-        if (profileData) {
-          setDoctorName(profileData.full_name);
-        }
-      }
-    };
-
-    getDoctorName();
-  }, []);
-
-  // Load patient data from Supabase
+  // Cargar datos del paciente desde la base de datos local
   useEffect(() => {
     const fetchPatient = async () => {
       setLoading(true);
       try {
-        // Check if we're creating a new patient (ID will be 'new-patient')
+        // Comprobar si estamos creando un nuevo paciente (ID será 'new-patient')
         if (id === 'new-patient') {
           setCreatingNewPatient(true);
           setPatient({
-            id: '',
             identity_id: '',
             name: '',
             birth_date: new Date().toISOString().split('T')[0],
@@ -158,51 +144,41 @@ const PatientMedicalHistory = () => {
           return;
         }
 
-        // Query for patient by identity_id (from QR code)
-        const { data: patientData, error: patientError } = await supabase
-          .from('patients')
-          .select('*')
-          .eq('identity_id', id)
-          .single();
+        // Buscar paciente por ID de identidad (del código QR)
+        let foundPatient = await db.patients.where('identity_id').equals(id || '').first();
+        
+        if (!foundPatient && !isNaN(Number(id))) {
+          // Si no se encuentra por identity_id, intentar buscar por ID numérico
+          foundPatient = await db.patients.get(Number(id));
+        }
 
-        if (patientError) {
-          // If not found by identity_id, try by UUID
-          const { data: patientByUuid, error: uuidError } = await supabase
-            .from('patients')
-            .select('*')
-            .eq('id', id)
-            .single();
+        if (foundPatient) {
+          // Calculamos la edad
+          const age = calculateAge(foundPatient.birth_date);
+          setPatient({ ...foundPatient, age });
           
-          if (uuidError) {
-            // Neither found, set creating new patient
-            setCreatingNewPatient(true);
-            setPatient({
-              id: '',
-              identity_id: id || '', // Use the scanned ID as identity_id
-              name: '',
-              birth_date: new Date().toISOString().split('T')[0],
-              gender: '',
-              address: '',
-              phone: '',
-              email: '',
-              blood_type: '',
-              allergies: [],
-              age: 0
-            });
-          } else {
-            // Found by UUID
-            const age = calculateAge(patientByUuid.birth_date);
-            setPatient({ ...patientByUuid, age });
-            await fetchMedicalRecords(patientByUuid.id);
+          // Cargar registros médicos del paciente
+          if (foundPatient.id) {
+            await fetchMedicalRecords(foundPatient.id);
           }
         } else {
-          // Found by identity_id
-          const age = calculateAge(patientData.birth_date);
-          setPatient({ ...patientData, age });
-          await fetchMedicalRecords(patientData.id);
+          // No se encontró, configurar para crear nuevo paciente
+          setCreatingNewPatient(true);
+          setPatient({
+            identity_id: id || '',
+            name: '',
+            birth_date: new Date().toISOString().split('T')[0],
+            gender: '',
+            address: '',
+            phone: '',
+            email: '',
+            blood_type: '',
+            allergies: [],
+            age: 0
+          });
         }
       } catch (error) {
-        console.error("Error loading patient data:", error);
+        console.error("Error cargando datos del paciente:", error);
         toast({
           title: "Error de carga",
           description: "No se pudo cargar la información del paciente",
@@ -216,29 +192,20 @@ const PatientMedicalHistory = () => {
     fetchPatient();
   }, [id, toast]);
 
-  // Fetch medical records for a patient
-  const fetchMedicalRecords = async (patientId: string) => {
+  // Obtener registros médicos para un paciente
+  const fetchMedicalRecords = async (patientId: number) => {
     try {
-      const { data: records, error } = await supabase
-        .from('medical_records')
-        .select(`
-          *,
-          profiles:doctor_id(full_name)
-        `)
-        .eq('patient_id', patientId)
-        .order('date', { ascending: false });
-
-      if (error) throw error;
-
-      if (records) {
-        const formattedRecords = records.map(record => ({
-          ...record,
-          doctor_name: record.profiles?.full_name
-        }));
-        setMedicalRecords(formattedRecords);
-      }
+      const records = await db.medicalRecords
+        .where('patient_id')
+        .equals(patientId)
+        .toArray();
+      
+      // Ordenar por fecha (más reciente primero)
+      records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      setMedicalRecords(records);
     } catch (error) {
-      console.error("Error fetching medical records:", error);
+      console.error("Error obteniendo registros médicos:", error);
       toast({
         title: "Error de carga",
         description: "No se pudieron cargar los registros médicos",
@@ -254,7 +221,7 @@ const PatientMedicalHistory = () => {
   const handlePatientDataChange = (field: keyof PatientData, value: any) => {
     if (!patient) return;
     
-    // If changing birth date, recalculate age
+    // Si se cambia la fecha de nacimiento, recalcular la edad
     if (field === 'birth_date') {
       const age = calculateAge(value);
       setPatient({
@@ -263,7 +230,7 @@ const PatientMedicalHistory = () => {
         age
       });
     } else if (field === 'allergies' && typeof value === 'string') {
-      // Handle allergies array
+      // Manejar array de alergias
       setPatient({
         ...patient,
         allergies: value.split(',').map(item => item.trim()).filter(item => item)
@@ -280,8 +247,8 @@ const PatientMedicalHistory = () => {
     if (!patient) return;
     
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
+      const userId = localStorage.getItem('userId');
+      if (!userId) {
         toast({
           title: "No ha iniciado sesión",
           description: "Debe iniciar sesión para guardar datos",
@@ -290,14 +257,12 @@ const PatientMedicalHistory = () => {
         return;
       }
 
-      const userId = sessionData.session.user.id;
-      
-      // Convert allergies array to proper format if it's a string
+      // Convertir alergias a formato adecuado si es un string
       const formattedAllergies = Array.isArray(patient.allergies) 
         ? patient.allergies 
-        : patient.allergies.split(',').map(item => item.trim());
+        : (patient.allergies as unknown as string).split(',').map(item => item.trim());
       
-      // Format patient data for Supabase
+      // Preparar datos del paciente
       const patientData = {
         identity_id: patient.identity_id,
         name: patient.name,
@@ -308,40 +273,56 @@ const PatientMedicalHistory = () => {
         email: patient.email || null,
         blood_type: patient.blood_type || null,
         allergies: formattedAllergies,
-        created_by: userId
+        created_at: new Date(),
+        updated_at: new Date()
       };
       
-      let result;
+      let patientId;
       
       if (creatingNewPatient) {
-        // Insert new patient
-        result = await supabase
-          .from('patients')
-          .insert(patientData)
-          .select()
-          .single();
+        // Insertar nuevo paciente
+        patientId = await db.patients.add(patientData);
+        
+        // Registrar actividad
+        await db.activityLogs.add({
+          action: 'Registro de Paciente',
+          user_id: userId,
+          user_name: localStorage.getItem('userName') || 'Usuario desconocido',
+          details: `Paciente ${patientData.name} (ID: ${patientData.identity_id}) registrado`,
+          created_at: new Date()
+        });
       } else {
-        // Update existing patient
-        result = await supabase
-          .from('patients')
-          .update(patientData)
-          .eq('id', patient.id)
-          .select()
-          .single();
+        // Actualizar paciente existente
+        if (patient.id) {
+          patientData.created_at = (await db.patients.get(patient.id))?.created_at || new Date();
+          await db.patients.update(patient.id, patientData);
+          patientId = patient.id;
+          
+          // Registrar actividad
+          await db.activityLogs.add({
+            action: 'Actualización de Paciente',
+            user_id: userId,
+            user_name: localStorage.getItem('userName') || 'Usuario desconocido',
+            details: `Información del paciente ${patientData.name} (ID: ${patientData.identity_id}) actualizada`,
+            created_at: new Date()
+          });
+        }
       }
       
-      if (result.error) throw result.error;
-      
-      // Update patient state with new data
-      const updatedPatient = result.data;
-      const age = calculateAge(updatedPatient.birth_date);
-      setPatient({ ...updatedPatient, age });
-      
-      // If was creating new patient, now we're not
-      if (creatingNewPatient) {
-        setCreatingNewPatient(false);
-        // Navigate to the new patient's page
-        navigate(`/paciente/${updatedPatient.id}`);
+      // Obtener el paciente actualizado
+      if (patientId) {
+        const updatedPatient = await db.patients.get(patientId);
+        if (updatedPatient) {
+          const age = calculateAge(updatedPatient.birth_date);
+          setPatient({ ...updatedPatient, age });
+        }
+        
+        // Si estábamos creando un nuevo paciente, ahora no lo estamos
+        if (creatingNewPatient) {
+          setCreatingNewPatient(false);
+          // Navegar a la página del nuevo paciente
+          navigate(`/paciente/${updatedPatient?.identity_id || patientId}`);
+        }
       }
       
       toast({
@@ -351,14 +332,14 @@ const PatientMedicalHistory = () => {
           : "La información del paciente ha sido actualizada",
       });
       
-      // Add activity log
+      // Añadir log de actividad
       sonnerToast.success(creatingNewPatient 
         ? "Paciente añadido a la base de datos" 
         : "Información del paciente actualizada");
       
       setEditMode(false);
     } catch (error: any) {
-      console.error("Error saving patient data:", error);
+      console.error("Error guardando datos del paciente:", error);
       toast({
         title: "Error al guardar",
         description: error.message || "No se pudo guardar la información del paciente",
@@ -368,11 +349,13 @@ const PatientMedicalHistory = () => {
   };
 
   const handleAddRecord = async () => {
-    if (!patient) return;
+    if (!patient || !patient.id) return;
     
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
+      const userId = localStorage.getItem('userId');
+      const userName = localStorage.getItem('userName');
+      
+      if (!userId || !userName) {
         toast({
           title: "No ha iniciado sesión",
           description: "Debe iniciar sesión para añadir registros",
@@ -380,38 +363,33 @@ const PatientMedicalHistory = () => {
         });
         return;
       }
-
-      const userId = sessionData.session.user.id;
       
-      // Create medical record
-      const { data, error } = await supabase
-        .from('medical_records')
-        .insert({
-          patient_id: patient.id,
-          date: newRecord.date,
-          diagnosis: newRecord.diagnosis,
-          treatment: newRecord.treatment,
-          medications: newRecord.medications,
-          notes: newRecord.notes,
-          doctor_id: userId
-        })
-        .select(`
-          *,
-          profiles:doctor_id(full_name)
-        `)
-        .single();
-      
-      if (error) throw error;
-      
-      // Add to medical records state
-      const recordWithDoctor = {
-        ...data,
-        doctor_name: data.profiles?.full_name
+      // Crear registro médico
+      const recordData = {
+        patient_id: patient.id,
+        date: newRecord.date,
+        diagnosis: newRecord.diagnosis,
+        treatment: newRecord.treatment,
+        medications: newRecord.medications,
+        notes: newRecord.notes,
+        doctor_id: userId,
+        doctor_name: userName,
+        created_at: new Date(),
+        updated_at: new Date()
       };
       
-      setMedicalRecords([recordWithDoctor, ...medicalRecords]);
+      // Guardar en la base de datos
+      const recordId = await db.medicalRecords.add(recordData);
       
-      // Reset form
+      // Obtener el registro completo
+      const savedRecord = await db.medicalRecords.get(recordId);
+      
+      if (savedRecord) {
+        // Añadir al estado
+        setMedicalRecords([savedRecord, ...medicalRecords]);
+      }
+      
+      // Reiniciar formulario
       setNewRecord({
         date: new Date().toISOString().split('T')[0],
         diagnosis: '',
@@ -425,10 +403,22 @@ const PatientMedicalHistory = () => {
         description: "El registro médico ha sido añadido exitosamente",
       });
       
-      // Switch to medical history tab
-      document.querySelector('[data-state="inactive"][data-value="historial"]')?.click();
+      // Registrar actividad
+      await db.activityLogs.add({
+        action: 'Nuevo Registro Médico',
+        user_id: userId,
+        user_name: userName,
+        details: `Registro médico añadido para paciente ${patient.name} (ID: ${patient.identity_id})`,
+        created_at: new Date()
+      });
+      
+      // Cambiar a la pestaña de historial médico
+      const historialTab = document.querySelector('[data-value="historial"]');
+      if (historialTab instanceof HTMLElement) {
+        historialTab.click();
+      }
     } catch (error: any) {
-      console.error("Error adding record:", error);
+      console.error("Error añadiendo registro:", error);
       toast({
         title: "Error al añadir registro",
         description: error.message || "No se pudo añadir el registro médico",
@@ -437,26 +427,36 @@ const PatientMedicalHistory = () => {
     }
   };
 
-  const handleDeleteRecord = async (recordId: string) => {
+  const handleDeleteRecord = async (recordId: number) => {
     if (!patient) return;
     
     try {
-      const { error } = await supabase
-        .from('medical_records')
-        .delete()
-        .eq('id', recordId);
+      // Eliminar de la base de datos
+      await db.medicalRecords.delete(recordId);
       
-      if (error) throw error;
-      
-      // Update records state
+      // Actualizar estado
       setMedicalRecords(medicalRecords.filter(record => record.id !== recordId));
       
       toast({
         title: "Registro eliminado",
         description: "El registro médico ha sido eliminado exitosamente",
       });
+      
+      // Registrar actividad
+      const userId = localStorage.getItem('userId');
+      const userName = localStorage.getItem('userName');
+      
+      if (userId && userName) {
+        await db.activityLogs.add({
+          action: 'Eliminación de Registro Médico',
+          user_id: userId,
+          user_name: userName,
+          details: `Registro médico eliminado para paciente ${patient.name} (ID: ${patient.identity_id})`,
+          created_at: new Date()
+        });
+      }
     } catch (error: any) {
-      console.error("Error deleting record:", error);
+      console.error("Error eliminando registro:", error);
       toast({
         title: "Error al eliminar",
         description: error.message || "No se pudo eliminar el registro médico",
@@ -489,7 +489,6 @@ const PatientMedicalHistory = () => {
             onClick={() => {
               setCreatingNewPatient(true);
               setPatient({
-                id: '',
                 identity_id: id || '',
                 name: '',
                 birth_date: new Date().toISOString().split('T')[0],
@@ -731,7 +730,7 @@ const PatientMedicalHistory = () => {
                           <Button 
                             variant="destructive" 
                             size="sm" 
-                            onClick={() => handleDeleteRecord(record.id)}
+                            onClick={() => record.id && handleDeleteRecord(record.id)}
                           >
                             <Trash2 size={16} />
                           </Button>
