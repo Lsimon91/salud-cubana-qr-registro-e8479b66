@@ -5,6 +5,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { supabase } from '@/integrations/supabase/client';
 import {
   Card,
   CardContent,
@@ -15,14 +16,15 @@ import {
 } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { User, Mail, Shield, Save, LogOut } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
 
 interface UserData {
   id: string;
-  name: string;
+  full_name: string;
   email: string;
   role: string;
-  createdAt: string;
-  lastLogin: string;
+  specialty: string | null;
+  created_at: string;
 }
 
 const UserProfile = () => {
@@ -34,55 +36,48 @@ const UserProfile = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Load user data from localStorage
+  // Load user data from Supabase
   useEffect(() => {
-    setLoading(true);
-    
-    try {
-      const userEmail = localStorage.getItem('userEmail');
-      const userRole = localStorage.getItem('userRole');
+    const fetchUserProfile = async () => {
+      setLoading(true);
       
-      if (!userEmail) {
-        navigate('/');
-        return;
-      }
-      
-      // Check if user exists in the users database
-      const usersDB = localStorage.getItem('usersDB');
-      let users = usersDB ? JSON.parse(usersDB) : [];
-      
-      let currentUser = users.find((u: UserData) => u.email === userEmail);
-      
-      if (!currentUser) {
-        // Create a default user if not found
-        currentUser = {
-          id: Date.now().toString(),
-          name: localStorage.getItem('userName') || 'Usuario',
-          email: userEmail,
-          role: userRole || 'Usuario',
-          createdAt: new Date().toISOString(),
-          lastLogin: new Date().toISOString()
-        };
+      try {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
         
-        users.push(currentUser);
-        localStorage.setItem('usersDB', JSON.stringify(users));
-      } else {
-        // Update last login
-        currentUser.lastLogin = new Date().toISOString();
-        localStorage.setItem('usersDB', JSON.stringify(users));
+        if (sessionError) throw sessionError;
+        
+        if (!sessionData.session) {
+          navigate('/');
+          return;
+        }
+        
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', sessionData.session.user.id)
+          .single();
+        
+        if (profileError) throw profileError;
+        
+        if (profileData) {
+          setUser({
+            ...profileData,
+            email: sessionData.session.user.email || ''
+          });
+        }
+      } catch (error: any) {
+        console.error("Error loading user data:", error);
+        toast({
+          title: "Error de carga",
+          description: "No se pudo cargar la información del usuario",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
       }
-      
-      setUser(currentUser);
-    } catch (error) {
-      console.error("Error loading user data:", error);
-      toast({
-        title: "Error de carga",
-        description: "No se pudo cargar la información del usuario",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
+    };
+
+    fetchUserProfile();
   }, [navigate, toast]);
 
   const handleEditToggle = () => {
@@ -94,7 +89,7 @@ const UserProfile = () => {
     }
   };
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
     if (!user) return;
     
     try {
@@ -108,66 +103,68 @@ const UserProfile = () => {
           });
           return;
         }
-      }
-      
-      // Get current users database
-      const usersDB = localStorage.getItem('usersDB');
-      let users = usersDB ? JSON.parse(usersDB) : [];
-      
-      // Find and update the user
-      const userIndex = users.findIndex((u: UserData) => u.id === user.id);
-      
-      if (userIndex !== -1) {
-        // Update user data but preserve role (can't change own role)
-        const currentRole = users[userIndex].role;
-        users[userIndex] = { ...user, role: currentRole };
         
-        localStorage.setItem('usersDB', JSON.stringify(users));
-        
-        // If this is the admin user and the name was changed, update localStorage
-        if (user.email === 'Admin@host.example.com') {
-          localStorage.setItem('userName', user.name);
+        // Change password if specified
+        if (password) {
+          const { error: passwordError } = await supabase.auth.updateUser({
+            password: password
+          });
+          
+          if (passwordError) throw passwordError;
         }
-        
-        toast({
-          title: "Perfil actualizado",
-          description: "Los cambios han sido guardados exitosamente",
-        });
-        
-        setEditMode(false);
-        setPassword('');
-        setConfirmPassword('');
-      } else {
-        toast({
-          title: "Error al guardar",
-          description: "No se encontró el usuario en la base de datos",
-          variant: "destructive",
-        });
       }
-    } catch (error) {
+      
+      // Update profile
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({
+          full_name: user.full_name,
+          specialty: user.specialty
+        })
+        .eq('id', user.id);
+      
+      if (profileError) throw profileError;
+      
+      toast({
+        title: "Perfil actualizado",
+        description: "Los cambios han sido guardados exitosamente",
+      });
+      
+      setEditMode(false);
+      setPassword('');
+      setConfirmPassword('');
+      
+      sonnerToast.success("Perfil actualizado correctamente");
+    } catch (error: any) {
       console.error("Error saving profile:", error);
       toast({
         title: "Error al guardar",
-        description: "No se pudo guardar la información del perfil",
+        description: error.message || "No se pudo guardar la información del perfil",
         variant: "destructive",
       });
     }
   };
 
-  const handleLogout = () => {
-    // Clear authentication data
-    localStorage.removeItem('isAuthenticated');
-    localStorage.removeItem('userRole');
-    localStorage.removeItem('userEmail');
-    localStorage.removeItem('userName');
-    
-    toast({
-      title: "Cerrando sesión",
-      description: "Has cerrado sesión correctamente.",
-    });
-    
-    // Redirect to login
-    navigate('/');
+  const handleLogout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      
+      toast({
+        title: "Cerrando sesión",
+        description: "Has cerrado sesión correctamente.",
+      });
+      
+      // Redirect to login
+      navigate('/');
+    } catch (error: any) {
+      console.error("Error signing out:", error);
+      toast({
+        title: "Error al cerrar sesión",
+        description: error.message || "No se pudo cerrar sesión",
+        variant: "destructive",
+      });
+    }
   };
 
   if (loading) {
@@ -194,7 +191,7 @@ const UserProfile = () => {
   }
 
   // Generate initials for avatar
-  const initials = user.name
+  const initials = user.full_name
     .split(' ')
     .map(name => name[0])
     .join('')
@@ -236,7 +233,7 @@ const UserProfile = () => {
                   </AvatarFallback>
                 </Avatar>
               </div>
-              <CardTitle>{user.name}</CardTitle>
+              <CardTitle>{user.full_name}</CardTitle>
               <CardDescription className="flex items-center justify-center">
                 <Shield className="mr-1" size={14} />
                 {user.role}
@@ -248,10 +245,7 @@ const UserProfile = () => {
                 {user.email}
               </div>
               <p className="text-sm text-gray-500">
-                Registrado: {new Date(user.createdAt).toLocaleDateString()}
-              </p>
-              <p className="text-sm text-gray-500">
-                Último acceso: {new Date(user.lastLogin).toLocaleDateString()}
+                Registrado: {new Date(user.created_at).toLocaleDateString()}
               </p>
             </CardContent>
           </Card>
@@ -270,11 +264,11 @@ const UserProfile = () => {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="name">Nombre completo</Label>
+                <Label htmlFor="full_name">Nombre completo</Label>
                 <Input 
-                  id="name"
-                  value={user.name}
-                  onChange={e => setUser({...user, name: e.target.value})}
+                  id="full_name"
+                  value={user.full_name}
+                  onChange={e => setUser({...user, full_name: e.target.value})}
                   disabled={!editMode}
                 />
               </div>
@@ -285,14 +279,22 @@ const UserProfile = () => {
                   id="email"
                   type="email"
                   value={user.email}
-                  onChange={e => setUser({...user, email: e.target.value})}
-                  disabled={!editMode || user.email === 'Admin@host.example.com'} // No editar email del admin
+                  disabled={true}
                 />
-                {user.email === 'Admin@host.example.com' && editMode && (
-                  <p className="text-xs text-amber-500 mt-1">
-                    El correo del administrador no se puede modificar
-                  </p>
-                )}
+                <p className="text-xs text-amber-500 mt-1">
+                  El correo electrónico no se puede modificar
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="specialty">Especialidad</Label>
+                <Input 
+                  id="specialty"
+                  value={user.specialty || ''}
+                  onChange={e => setUser({...user, specialty: e.target.value})}
+                  disabled={!editMode}
+                  placeholder="Ej. Cardiología, Pediatría, etc."
+                />
               </div>
               
               {editMode && (

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { supabase } from '@/integrations/supabase/client';
 import {
   Table,
   TableBody,
@@ -34,8 +35,11 @@ import {
   Mail, 
   Save, 
   Plus, 
-  Trash2
+  Trash2, 
+  AlertTriangle,
+  UserPlus
 } from 'lucide-react';
+import { toast as sonnerToast } from 'sonner';
 
 interface MedicalRecord {
   id: string;
@@ -43,22 +47,23 @@ interface MedicalRecord {
   diagnosis: string;
   treatment: string;
   medications: string;
-  notes: string;
-  doctor: string;
+  notes: string | null;
+  doctor_id: string;
+  doctor_name?: string;
 }
 
 interface PatientData {
   id: string;
-  nombre: string;
-  fechaNacimiento: string;
-  edad: number;
-  genero: string;
-  direccion: string;
-  telefono?: string;
-  email?: string;
-  alergias: string[];
-  grupoSanguineo?: string;
-  historiaClinica: MedicalRecord[];
+  identity_id: string;
+  name: string;
+  birth_date: string;
+  gender: string;
+  address: string;
+  phone: string | null;
+  email: string | null;
+  blood_type: string | null;
+  allergies: string[];
+  age?: number;
 }
 
 const PatientMedicalHistory = () => {
@@ -66,37 +71,135 @@ const PatientMedicalHistory = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [patient, setPatient] = useState<PatientData | null>(null);
+  const [medicalRecords, setMedicalRecords] = useState<MedicalRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
-  const [newRecord, setNewRecord] = useState<Omit<MedicalRecord, 'id'>>({
+  const [creatingNewPatient, setCreatingNewPatient] = useState(false);
+  const [newRecord, setNewRecord] = useState<Omit<MedicalRecord, 'id' | 'doctor_id'>>({
     date: new Date().toISOString().split('T')[0],
     diagnosis: '',
     treatment: '',
     medications: '',
-    notes: '',
-    doctor: localStorage.getItem('userName') || 'Doctor sin especificar'
+    notes: ''
   });
+  const [doctorName, setDoctorName] = useState('');
 
-  // Load patient data from localStorage
+  // Calculate age from birth date
+  const calculateAge = (birthDate: string): number => {
+    const today = new Date();
+    const birthDateObj = new Date(birthDate);
+    let age = today.getFullYear() - birthDateObj.getFullYear();
+    const m = today.getMonth() - birthDateObj.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDateObj.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  // Check if user is authenticated
   useEffect(() => {
-    setLoading(true);
-    const loadPatient = () => {
-      try {
-        // Get the patients database from localStorage
-        const patientsDB = localStorage.getItem('patientsDB');
-        if (patientsDB) {
-          const patients: PatientData[] = JSON.parse(patientsDB);
-          const foundPatient = patients.find(p => p.id === id);
+    const checkAuth = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
+        toast({
+          title: "No ha iniciado sesión",
+          description: "Debe iniciar sesión para acceder a esta página",
+          variant: "destructive",
+        });
+        navigate('/');
+      }
+    };
+
+    checkAuth();
+  }, [navigate, toast]);
+
+  // Get doctor name
+  useEffect(() => {
+    const getDoctorName = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', sessionData.session.user.id)
+          .single();
           
-          if (foundPatient) {
-            setPatient(foundPatient);
-          } else {
-            toast({
-              title: "Paciente no encontrado",
-              description: "No se encontró información para este paciente",
-              variant: "destructive",
+        if (profileData) {
+          setDoctorName(profileData.full_name);
+        }
+      }
+    };
+
+    getDoctorName();
+  }, []);
+
+  // Load patient data from Supabase
+  useEffect(() => {
+    const fetchPatient = async () => {
+      setLoading(true);
+      try {
+        // Check if we're creating a new patient (ID will be 'new-patient')
+        if (id === 'new-patient') {
+          setCreatingNewPatient(true);
+          setPatient({
+            id: '',
+            identity_id: '',
+            name: '',
+            birth_date: new Date().toISOString().split('T')[0],
+            gender: '',
+            address: '',
+            phone: '',
+            email: '',
+            blood_type: '',
+            allergies: [],
+            age: 0
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Query for patient by identity_id (from QR code)
+        const { data: patientData, error: patientError } = await supabase
+          .from('patients')
+          .select('*')
+          .eq('identity_id', id)
+          .single();
+
+        if (patientError) {
+          // If not found by identity_id, try by UUID
+          const { data: patientByUuid, error: uuidError } = await supabase
+            .from('patients')
+            .select('*')
+            .eq('id', id)
+            .single();
+          
+          if (uuidError) {
+            // Neither found, set creating new patient
+            setCreatingNewPatient(true);
+            setPatient({
+              id: '',
+              identity_id: id || '', // Use the scanned ID as identity_id
+              name: '',
+              birth_date: new Date().toISOString().split('T')[0],
+              gender: '',
+              address: '',
+              phone: '',
+              email: '',
+              blood_type: '',
+              allergies: [],
+              age: 0
             });
+          } else {
+            // Found by UUID
+            const age = calculateAge(patientByUuid.birth_date);
+            setPatient({ ...patientByUuid, age });
+            await fetchMedicalRecords(patientByUuid.id);
           }
+        } else {
+          // Found by identity_id
+          const age = calculateAge(patientData.birth_date);
+          setPatient({ ...patientData, age });
+          await fetchMedicalRecords(patientData.id);
         }
       } catch (error) {
         console.error("Error loading patient data:", error);
@@ -110,53 +213,37 @@ const PatientMedicalHistory = () => {
       }
     };
 
-    loadPatient();
+    fetchPatient();
   }, [id, toast]);
 
-  const savePatientData = (updatedPatient: PatientData) => {
+  // Fetch medical records for a patient
+  const fetchMedicalRecords = async (patientId: string) => {
     try {
-      // Get current patients database
-      const patientsDB = localStorage.getItem('patientsDB');
-      let patients: PatientData[] = patientsDB ? JSON.parse(patientsDB) : [];
-      
-      // Find and update the patient
-      const patientIndex = patients.findIndex(p => p.id === updatedPatient.id);
-      
-      if (patientIndex !== -1) {
-        patients[patientIndex] = updatedPatient;
-      } else {
-        patients.push(updatedPatient);
+      const { data: records, error } = await supabase
+        .from('medical_records')
+        .select(`
+          *,
+          profiles:doctor_id(full_name)
+        `)
+        .eq('patient_id', patientId)
+        .order('date', { ascending: false });
+
+      if (error) throw error;
+
+      if (records) {
+        const formattedRecords = records.map(record => ({
+          ...record,
+          doctor_name: record.profiles?.full_name
+        }));
+        setMedicalRecords(formattedRecords);
       }
-      
-      // Save back to localStorage
-      localStorage.setItem('patientsDB', JSON.stringify(patients));
-      
-      // Add activity log
-      const activityLog = localStorage.getItem('activityLog');
-      const activities = activityLog ? JSON.parse(activityLog) : [];
-      activities.push({
-        id: Date.now().toString(),
-        user: localStorage.getItem('userName') || 'Usuario desconocido',
-        action: patientIndex !== -1 ? 'Actualización de historial médico' : 'Creación de historial médico',
-        patient: updatedPatient.nombre,
-        timestamp: new Date().toISOString()
-      });
-      localStorage.setItem('activityLog', JSON.stringify(activities));
-      
-      toast({
-        title: "Guardado exitosamente",
-        description: "La información del paciente ha sido actualizada",
-      });
-      
-      return true;
     } catch (error) {
-      console.error("Error saving patient data:", error);
+      console.error("Error fetching medical records:", error);
       toast({
-        title: "Error al guardar",
-        description: "No se pudo guardar la información del paciente",
+        title: "Error de carga",
+        description: "No se pudieron cargar los registros médicos",
         variant: "destructive",
       });
-      return false;
     }
   };
 
@@ -167,60 +254,214 @@ const PatientMedicalHistory = () => {
   const handlePatientDataChange = (field: keyof PatientData, value: any) => {
     if (!patient) return;
     
-    setPatient({
-      ...patient,
-      [field]: value
-    });
-  };
-
-  const handleSavePatientData = () => {
-    if (!patient) return;
-    
-    const success = savePatientData(patient);
-    if (success) {
-      setEditMode(false);
+    // If changing birth date, recalculate age
+    if (field === 'birth_date') {
+      const age = calculateAge(value);
+      setPatient({
+        ...patient,
+        [field]: value,
+        age
+      });
+    } else if (field === 'allergies' && typeof value === 'string') {
+      // Handle allergies array
+      setPatient({
+        ...patient,
+        allergies: value.split(',').map(item => item.trim()).filter(item => item)
+      });
+    } else {
+      setPatient({
+        ...patient,
+        [field]: value
+      });
     }
   };
 
-  const handleAddRecord = () => {
+  const handleSavePatientData = async () => {
     if (!patient) return;
     
-    const newMedicalRecord: MedicalRecord = {
-      id: Date.now().toString(),
-      ...newRecord
-    };
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        toast({
+          title: "No ha iniciado sesión",
+          description: "Debe iniciar sesión para guardar datos",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const userId = sessionData.session.user.id;
+      
+      // Convert allergies array to proper format if it's a string
+      const formattedAllergies = Array.isArray(patient.allergies) 
+        ? patient.allergies 
+        : patient.allergies.split(',').map(item => item.trim());
+      
+      // Format patient data for Supabase
+      const patientData = {
+        identity_id: patient.identity_id,
+        name: patient.name,
+        birth_date: patient.birth_date,
+        gender: patient.gender,
+        address: patient.address,
+        phone: patient.phone || null,
+        email: patient.email || null,
+        blood_type: patient.blood_type || null,
+        allergies: formattedAllergies,
+        created_by: userId
+      };
+      
+      let result;
+      
+      if (creatingNewPatient) {
+        // Insert new patient
+        result = await supabase
+          .from('patients')
+          .insert(patientData)
+          .select()
+          .single();
+      } else {
+        // Update existing patient
+        result = await supabase
+          .from('patients')
+          .update(patientData)
+          .eq('id', patient.id)
+          .select()
+          .single();
+      }
+      
+      if (result.error) throw result.error;
+      
+      // Update patient state with new data
+      const updatedPatient = result.data;
+      const age = calculateAge(updatedPatient.birth_date);
+      setPatient({ ...updatedPatient, age });
+      
+      // If was creating new patient, now we're not
+      if (creatingNewPatient) {
+        setCreatingNewPatient(false);
+        // Navigate to the new patient's page
+        navigate(`/paciente/${updatedPatient.id}`);
+      }
+      
+      toast({
+        title: creatingNewPatient ? "Paciente creado" : "Datos actualizados",
+        description: creatingNewPatient 
+          ? "El paciente ha sido creado exitosamente" 
+          : "La información del paciente ha sido actualizada",
+      });
+      
+      // Add activity log
+      sonnerToast.success(creatingNewPatient 
+        ? "Paciente añadido a la base de datos" 
+        : "Información del paciente actualizada");
+      
+      setEditMode(false);
+    } catch (error: any) {
+      console.error("Error saving patient data:", error);
+      toast({
+        title: "Error al guardar",
+        description: error.message || "No se pudo guardar la información del paciente",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleAddRecord = async () => {
+    if (!patient) return;
     
-    const updatedPatient = {
-      ...patient,
-      historiaClinica: [...patient.historiaClinica, newMedicalRecord]
-    };
-    
-    const success = savePatientData(updatedPatient);
-    if (success) {
-      setPatient(updatedPatient);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        toast({
+          title: "No ha iniciado sesión",
+          description: "Debe iniciar sesión para añadir registros",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const userId = sessionData.session.user.id;
+      
+      // Create medical record
+      const { data, error } = await supabase
+        .from('medical_records')
+        .insert({
+          patient_id: patient.id,
+          date: newRecord.date,
+          diagnosis: newRecord.diagnosis,
+          treatment: newRecord.treatment,
+          medications: newRecord.medications,
+          notes: newRecord.notes,
+          doctor_id: userId
+        })
+        .select(`
+          *,
+          profiles:doctor_id(full_name)
+        `)
+        .single();
+      
+      if (error) throw error;
+      
+      // Add to medical records state
+      const recordWithDoctor = {
+        ...data,
+        doctor_name: data.profiles?.full_name
+      };
+      
+      setMedicalRecords([recordWithDoctor, ...medicalRecords]);
+      
+      // Reset form
       setNewRecord({
         date: new Date().toISOString().split('T')[0],
         diagnosis: '',
         treatment: '',
         medications: '',
-        notes: '',
-        doctor: localStorage.getItem('userName') || 'Doctor sin especificar'
+        notes: ''
+      });
+      
+      toast({
+        title: "Registro añadido",
+        description: "El registro médico ha sido añadido exitosamente",
+      });
+      
+      // Switch to medical history tab
+      document.querySelector('[data-state="inactive"][data-value="historial"]')?.click();
+    } catch (error: any) {
+      console.error("Error adding record:", error);
+      toast({
+        title: "Error al añadir registro",
+        description: error.message || "No se pudo añadir el registro médico",
+        variant: "destructive",
       });
     }
   };
 
-  const handleDeleteRecord = (recordId: string) => {
+  const handleDeleteRecord = async (recordId: string) => {
     if (!patient) return;
     
-    const updatedRecords = patient.historiaClinica.filter(record => record.id !== recordId);
-    const updatedPatient = {
-      ...patient,
-      historiaClinica: updatedRecords
-    };
-    
-    const success = savePatientData(updatedPatient);
-    if (success) {
-      setPatient(updatedPatient);
+    try {
+      const { error } = await supabase
+        .from('medical_records')
+        .delete()
+        .eq('id', recordId);
+      
+      if (error) throw error;
+      
+      // Update records state
+      setMedicalRecords(medicalRecords.filter(record => record.id !== recordId));
+      
+      toast({
+        title: "Registro eliminado",
+        description: "El registro médico ha sido eliminado exitosamente",
+      });
+    } catch (error: any) {
+      console.error("Error deleting record:", error);
+      toast({
+        title: "Error al eliminar",
+        description: error.message || "No se pudo eliminar el registro médico",
+        variant: "destructive",
+      });
     }
   };
 
@@ -232,7 +473,7 @@ const PatientMedicalHistory = () => {
     );
   }
 
-  if (!patient) {
+  if (!patient && !creatingNewPatient) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4">
         <div className="text-center mb-8">
@@ -240,9 +481,34 @@ const PatientMedicalHistory = () => {
           <h2 className="text-2xl font-bold text-gray-700">Paciente no encontrado</h2>
           <p className="text-gray-500 mt-2">No se encontró información para este paciente en el sistema.</p>
         </div>
-        <Button onClick={() => navigate('/escanear')} className="bg-medical-blue hover:bg-medical-blue/90">
-          Escanear otro paciente
-        </Button>
+        <div className="flex space-x-4">
+          <Button onClick={() => navigate('/escanear')} className="bg-medical-blue hover:bg-medical-blue/90">
+            Escanear otro paciente
+          </Button>
+          <Button 
+            onClick={() => {
+              setCreatingNewPatient(true);
+              setPatient({
+                id: '',
+                identity_id: id || '',
+                name: '',
+                birth_date: new Date().toISOString().split('T')[0],
+                gender: '',
+                address: '',
+                phone: '',
+                email: '',
+                blood_type: '',
+                allergies: [],
+                age: 0
+              });
+              setEditMode(true);
+            }} 
+            className="bg-medical-teal hover:bg-medical-teal/90"
+          >
+            <UserPlus className="mr-2" size={16} />
+            Crear nuevo paciente
+          </Button>
+        </div>
       </div>
     );
   }
@@ -251,25 +517,37 @@ const PatientMedicalHistory = () => {
     <div className="container mx-auto py-6 px-4">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Historial Médico</h1>
-          <p className="text-gray-600">
-            Paciente: {patient.nombre} | ID: {patient.id}
-          </p>
+          <h1 className="text-2xl font-bold text-gray-800">
+            {creatingNewPatient ? 'Crear Nuevo Paciente' : 'Historial Médico'}
+          </h1>
+          {!creatingNewPatient && (
+            <p className="text-gray-600">
+              Paciente: {patient?.name} | ID: {patient?.identity_id}
+            </p>
+          )}
+          {creatingNewPatient && (
+            <p className="text-gray-600 flex items-center">
+              <AlertTriangle className="text-amber-500 mr-1" size={16} />
+              Complete la información y guarde para crear el paciente
+            </p>
+          )}
         </div>
-        <Button 
-          onClick={handleEditToggle} 
-          variant={editMode ? "destructive" : "outline"}
-          className={editMode ? "" : "border-medical-teal text-medical-teal"}
-        >
-          {editMode ? "Cancelar Edición" : "Editar Información"}
-        </Button>
+        {!creatingNewPatient && (
+          <Button 
+            onClick={handleEditToggle} 
+            variant={editMode ? "destructive" : "outline"}
+            className={editMode ? "" : "border-medical-teal text-medical-teal"}
+          >
+            {editMode ? "Cancelar Edición" : "Editar Información"}
+          </Button>
+        )}
       </div>
 
-      <Tabs defaultValue="informacion">
+      <Tabs defaultValue={creatingNewPatient ? "informacion" : "historial"}>
         <TabsList className="grid w-full grid-cols-3 mb-6">
           <TabsTrigger value="informacion">Información Personal</TabsTrigger>
-          <TabsTrigger value="historial">Historial Clínico</TabsTrigger>
-          <TabsTrigger value="nuevo">Agregar Registro</TabsTrigger>
+          <TabsTrigger value="historial" disabled={creatingNewPatient}>Historial Clínico</TabsTrigger>
+          <TabsTrigger value="nuevo" disabled={creatingNewPatient}>Agregar Registro</TabsTrigger>
         </TabsList>
 
         {/* Información Personal Tab */}
@@ -281,72 +559,88 @@ const PatientMedicalHistory = () => {
                 Información Personal
               </CardTitle>
               <CardDescription>
-                Datos personales y de contacto del paciente
+                {creatingNewPatient 
+                  ? 'Ingrese los datos personales del nuevo paciente' 
+                  : 'Datos personales y de contacto del paciente'}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <Label htmlFor="nombre">Nombre Completo</Label>
+                  <Label htmlFor="identity_id">Número de identificación</Label>
                   <Input 
-                    id="nombre"
-                    value={patient.nombre}
-                    onChange={e => handlePatientDataChange('nombre', e.target.value)}
+                    id="identity_id"
+                    value={patient?.identity_id || ''}
+                    onChange={e => handlePatientDataChange('identity_id', e.target.value)}
                     disabled={!editMode}
+                    required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="fechaNacimiento">Fecha de Nacimiento</Label>
+                  <Label htmlFor="name">Nombre Completo</Label>
+                  <Input 
+                    id="name"
+                    value={patient?.name || ''}
+                    onChange={e => handlePatientDataChange('name', e.target.value)}
+                    disabled={!editMode}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="birth_date">Fecha de Nacimiento</Label>
                   <div className="flex items-center">
                     <Calendar className="mr-2 text-gray-500" size={16} />
                     <Input 
-                      id="fechaNacimiento"
+                      id="birth_date"
                       type="date"
-                      value={patient.fechaNacimiento}
-                      onChange={e => handlePatientDataChange('fechaNacimiento', e.target.value)}
+                      value={patient?.birth_date || ''}
+                      onChange={e => handlePatientDataChange('birth_date', e.target.value)}
                       disabled={!editMode}
+                      required
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="genero">Género</Label>
+                  <Label htmlFor="gender">Género</Label>
                   <Input 
-                    id="genero"
-                    value={patient.genero}
-                    onChange={e => handlePatientDataChange('genero', e.target.value)}
+                    id="gender"
+                    value={patient?.gender || ''}
+                    onChange={e => handlePatientDataChange('gender', e.target.value)}
                     disabled={!editMode}
+                    required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="edad">Edad</Label>
+                  <Label htmlFor="age">Edad</Label>
                   <Input 
-                    id="edad"
+                    id="age"
                     type="number"
-                    value={patient.edad}
-                    onChange={e => handlePatientDataChange('edad', parseInt(e.target.value))}
-                    disabled={!editMode}
+                    value={patient?.age || 0}
+                    disabled={true}
                   />
+                  <p className="text-xs text-gray-500">Calculada automáticamente</p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="direccion">Dirección</Label>
+                  <Label htmlFor="address">Dirección</Label>
                   <div className="flex items-center">
                     <MapPin className="mr-2 text-gray-500" size={16} />
                     <Input 
-                      id="direccion"
-                      value={patient.direccion}
-                      onChange={e => handlePatientDataChange('direccion', e.target.value)}
+                      id="address"
+                      value={patient?.address || ''}
+                      onChange={e => handlePatientDataChange('address', e.target.value)}
                       disabled={!editMode}
+                      required
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="telefono">Teléfono</Label>
+                  <Label htmlFor="phone">Teléfono</Label>
                   <div className="flex items-center">
                     <Phone className="mr-2 text-gray-500" size={16} />
                     <Input 
-                      id="telefono"
-                      value={patient.telefono || ''}
-                      onChange={e => handlePatientDataChange('telefono', e.target.value)}
+                      id="phone"
+                      value={patient?.phone || ''}
+                      onChange={e => handlePatientDataChange('phone', e.target.value)}
                       disabled={!editMode}
                     />
                   </div>
@@ -358,42 +652,42 @@ const PatientMedicalHistory = () => {
                     <Input 
                       id="email"
                       type="email"
-                      value={patient.email || ''}
+                      value={patient?.email || ''}
                       onChange={e => handlePatientDataChange('email', e.target.value)}
                       disabled={!editMode}
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="grupoSanguineo">Grupo Sanguíneo</Label>
+                  <Label htmlFor="blood_type">Grupo Sanguíneo</Label>
                   <Input 
-                    id="grupoSanguineo"
-                    value={patient.grupoSanguineo || ''}
-                    onChange={e => handlePatientDataChange('grupoSanguineo', e.target.value)}
+                    id="blood_type"
+                    value={patient?.blood_type || ''}
+                    onChange={e => handlePatientDataChange('blood_type', e.target.value)}
                     disabled={!editMode}
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="alergias">Alergias</Label>
+                <Label htmlFor="allergies">Alergias</Label>
                 <Textarea 
-                  id="alergias"
-                  value={patient.alergias.join(', ')}
-                  onChange={e => handlePatientDataChange('alergias', e.target.value.split(', '))}
+                  id="allergies"
+                  value={Array.isArray(patient?.allergies) ? patient?.allergies.join(', ') : patient?.allergies || ''}
+                  onChange={e => handlePatientDataChange('allergies', e.target.value)}
                   disabled={!editMode}
                   placeholder="Separe las alergias con comas"
                 />
               </div>
             </CardContent>
-            {editMode && (
+            {(editMode || creatingNewPatient) && (
               <CardFooter>
                 <Button 
                   onClick={handleSavePatientData} 
                   className="ml-auto bg-medical-blue hover:bg-medical-blue/90"
                 >
                   <Save className="mr-2" size={16} />
-                  Guardar Cambios
+                  {creatingNewPatient ? 'Crear Paciente' : 'Guardar Cambios'}
                 </Button>
               </CardFooter>
             )}
@@ -413,7 +707,7 @@ const PatientMedicalHistory = () => {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {patient.historiaClinica && patient.historiaClinica.length > 0 ? (
+              {medicalRecords && medicalRecords.length > 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -426,13 +720,13 @@ const PatientMedicalHistory = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {patient.historiaClinica.map((record) => (
+                    {medicalRecords.map((record) => (
                       <TableRow key={record.id}>
-                        <TableCell className="font-medium">{record.date}</TableCell>
+                        <TableCell className="font-medium">{new Date(record.date).toLocaleDateString()}</TableCell>
                         <TableCell>{record.diagnosis}</TableCell>
                         <TableCell>{record.treatment}</TableCell>
                         <TableCell>{record.medications}</TableCell>
-                        <TableCell>{record.doctor}</TableCell>
+                        <TableCell>{record.doctor_name}</TableCell>
                         <TableCell>
                           <Button 
                             variant="destructive" 
@@ -484,8 +778,8 @@ const PatientMedicalHistory = () => {
                   <Label htmlFor="doctor">Médico</Label>
                   <Input 
                     id="doctor"
-                    value={newRecord.doctor}
-                    onChange={e => setNewRecord({...newRecord, doctor: e.target.value})}
+                    value={doctorName}
+                    disabled
                   />
                 </div>
               </div>
@@ -533,7 +827,7 @@ const PatientMedicalHistory = () => {
                 <Label htmlFor="notes">Notas adicionales</Label>
                 <Textarea 
                   id="notes"
-                  value={newRecord.notes}
+                  value={newRecord.notes || ''}
                   onChange={e => setNewRecord({...newRecord, notes: e.target.value})}
                   placeholder="Notas adicionales sobre el paciente o tratamiento"
                 />
