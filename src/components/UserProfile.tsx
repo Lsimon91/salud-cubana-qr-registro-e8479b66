@@ -1,75 +1,73 @@
 
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useToast } from '@/hooks/use-toast';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { supabase } from '@/integrations/supabase/client';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { User, Mail, Shield, Save, LogOut } from 'lucide-react';
-import { toast as sonnerToast } from 'sonner';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useToast } from '@/hooks/use-toast';
+import { db } from '@/db/localDatabase';
 
-interface UserData {
+interface ProfileData {
   id: string;
-  full_name: string;
   email: string;
+  full_name: string;
   role: string;
-  specialty: string | null;
-  created_at: string;
+  specialty?: string;
 }
 
 const UserProfile = () => {
-  const navigate = useNavigate();
-  const { toast } = useToast();
-  const [user, setUser] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [editMode, setEditMode] = useState(false);
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [editableProfile, setEditableProfile] = useState<{ full_name: string; specialty: string }>({
+    full_name: '',
+    specialty: ''
+  });
+  const { toast } = useToast();
 
-  // Load user data from Supabase
+  // Cargar perfil del usuario
   useEffect(() => {
-    const fetchUserProfile = async () => {
-      setLoading(true);
-      
+    const loadUserProfile = async () => {
       try {
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) throw sessionError;
-        
-        if (!sessionData.session) {
-          navigate('/');
+        const userId = localStorage.getItem('userId');
+        if (!userId) {
+          toast({
+            title: "Error de autenticación",
+            description: "No se pudo identificar al usuario",
+            variant: "destructive",
+          });
           return;
         }
+
+        // Obtener usuario de la base de datos local
+        const user = await db.users.get(userId);
         
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', sessionData.session.user.id)
-          .single();
-        
-        if (profileError) throw profileError;
-        
-        if (profileData) {
-          setUser({
-            ...profileData,
-            email: sessionData.session.user.email || ''
+        if (user) {
+          setProfile({
+            id: user.id,
+            email: user.email,
+            full_name: user.full_name,
+            role: user.role,
+            specialty: user.specialty
+          });
+          
+          setEditableProfile({
+            full_name: user.full_name,
+            specialty: user.specialty || ''
+          });
+        } else {
+          toast({
+            title: "Perfil no encontrado",
+            description: "No se pudo encontrar la información del perfil",
+            variant: "destructive",
           });
         }
-      } catch (error: any) {
-        console.error("Error loading user data:", error);
+      } catch (error) {
+        console.error("Error cargando perfil:", error);
         toast({
-          title: "Error de carga",
-          description: "No se pudo cargar la información del usuario",
+          title: "Error",
+          description: "Ocurrió un error al cargar el perfil",
           variant: "destructive",
         });
       } finally {
@@ -77,278 +75,131 @@ const UserProfile = () => {
       }
     };
 
-    fetchUserProfile();
-  }, [navigate, toast]);
+    loadUserProfile();
+  }, [toast]);
 
-  const handleEditToggle = () => {
-    setEditMode(!editMode);
-    // Reset password fields when leaving edit mode
-    if (editMode) {
-      setPassword('');
-      setConfirmPassword('');
-    }
-  };
-
-  const handleSaveProfile = async () => {
-    if (!user) return;
+  const handleUpdateProfile = async () => {
+    if (!profile) return;
     
     try {
-      // Check if passwords match if changing password
-      if (password || confirmPassword) {
-        if (password !== confirmPassword) {
-          toast({
-            title: "Error de validación",
-            description: "Las contraseñas no coinciden",
-            variant: "destructive",
-          });
-          return;
-        }
-        
-        // Change password if specified
-        if (password) {
-          const { error: passwordError } = await supabase.auth.updateUser({
-            password: password
-          });
-          
-          if (passwordError) throw passwordError;
-        }
-      }
+      setSaving(true);
       
-      // Update profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({
-          full_name: user.full_name,
-          specialty: user.specialty
-        })
-        .eq('id', user.id);
+      // Actualizar en la base de datos local
+      await db.users.update(profile.id, {
+        full_name: editableProfile.full_name,
+        specialty: editableProfile.specialty,
+        updated_at: new Date()
+      });
       
-      if (profileError) throw profileError;
+      // Actualizar nombre en localStorage
+      localStorage.setItem('userName', editableProfile.full_name);
+      
+      // Actualizar estado local
+      setProfile({
+        ...profile,
+        full_name: editableProfile.full_name,
+        specialty: editableProfile.specialty
+      });
+      
+      // Registrar actividad
+      await db.activityLogs.add({
+        action: 'Actualización de Perfil',
+        user_id: profile.id,
+        user_name: editableProfile.full_name,
+        details: 'Información de perfil actualizada',
+        created_at: new Date()
+      });
       
       toast({
         title: "Perfil actualizado",
-        description: "Los cambios han sido guardados exitosamente",
+        description: "Su información ha sido actualizada exitosamente",
       });
-      
-      setEditMode(false);
-      setPassword('');
-      setConfirmPassword('');
-      
-      sonnerToast.success("Perfil actualizado correctamente");
-    } catch (error: any) {
-      console.error("Error saving profile:", error);
+    } catch (error) {
+      console.error("Error actualizando perfil:", error);
       toast({
-        title: "Error al guardar",
-        description: error.message || "No se pudo guardar la información del perfil",
+        title: "Error",
+        description: "No se pudo actualizar el perfil",
         variant: "destructive",
       });
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      
-      toast({
-        title: "Cerrando sesión",
-        description: "Has cerrado sesión correctamente.",
-      });
-      
-      // Redirect to login
-      navigate('/');
-    } catch (error: any) {
-      console.error("Error signing out:", error);
-      toast({
-        title: "Error al cerrar sesión",
-        description: error.message || "No se pudo cerrar sesión",
-        variant: "destructive",
-      });
+    } finally {
+      setSaving(false);
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="h-16 w-16 border-4 border-medical-blue border-t-transparent rounded-full animate-spin"></div>
+      <div className="flex justify-center items-center min-h-[400px]">
+        <div className="h-8 w-8 border-4 border-t-blue-500 border-blue-200 rounded-full animate-spin"></div>
       </div>
     );
   }
 
-  if (!user) {
+  if (!profile) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-4">
-        <div className="text-center mb-8">
-          <User size={48} className="mx-auto text-gray-400 mb-4" />
-          <h2 className="text-2xl font-bold text-gray-700">Usuario no encontrado</h2>
-          <p className="text-gray-500 mt-2">No se encontró información para este usuario en el sistema.</p>
-        </div>
-        <Button onClick={() => navigate('/')} className="bg-medical-blue hover:bg-medical-blue/90">
-          Volver al inicio
-        </Button>
+      <div className="text-center p-6 bg-white rounded-lg shadow">
+        <p className="text-gray-500">No se pudo cargar la información del perfil</p>
       </div>
     );
   }
-
-  // Generate initials for avatar
-  const initials = user.full_name
-    .split(' ')
-    .map(name => name[0])
-    .join('')
-    .toUpperCase()
-    .substring(0, 2);
 
   return (
-    <div className="container mx-auto py-6 px-4">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">Mi Perfil</h1>
-        <div className="flex space-x-3">
-          <Button 
-            onClick={handleEditToggle} 
-            variant={editMode ? "destructive" : "outline"}
-            className={editMode ? "" : "border-medical-teal text-medical-teal"}
-          >
-            {editMode ? "Cancelar Edición" : "Editar Perfil"}
-          </Button>
-          <Button 
-            onClick={handleLogout} 
-            variant="outline" 
-            className="border-medical-red text-medical-red"
-          >
-            <LogOut className="mr-2" size={16} />
-            Cerrar Sesión
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <Card className="max-w-2xl mx-auto">
+        <CardHeader className="pb-3">
+          <div className="flex items-center space-x-4">
+            <Avatar className="h-16 w-16">
+              <AvatarImage src="" alt={profile.full_name} />
+              <AvatarFallback className="text-lg bg-medical-blue text-white">
+                {profile.full_name.split(' ').map(n => n[0]).join('').toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <CardTitle className="text-xl">{profile.full_name}</CardTitle>
+              <CardDescription>{profile.role}</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="email">Correo electrónico</Label>
+              <Input id="email" value={profile.email} disabled />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="role">Rol</Label>
+              <Input id="role" value={profile.role} disabled />
+            </div>
+          </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1">
-          <Card>
-            <CardHeader className="text-center">
-              <div className="flex justify-center mb-4">
-                <Avatar className="h-24 w-24">
-                  <AvatarImage src="" />
-                  <AvatarFallback className="bg-medical-purple text-white text-2xl">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-              </div>
-              <CardTitle>{user.full_name}</CardTitle>
-              <CardDescription className="flex items-center justify-center">
-                <Shield className="mr-1" size={14} />
-                {user.role}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="text-center">
-              <div className="flex items-center justify-center text-gray-500 mb-2">
-                <Mail className="mr-2" size={16} />
-                {user.email}
-              </div>
-              <p className="text-sm text-gray-500">
-                Registrado: {new Date(user.created_at).toLocaleDateString()}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+          <div className="space-y-2">
+            <Label htmlFor="full_name">Nombre completo</Label>
+            <Input 
+              id="full_name" 
+              value={editableProfile.full_name} 
+              onChange={(e) => setEditableProfile({...editableProfile, full_name: e.target.value})}
+            />
+          </div>
 
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <User className="mr-2 text-medical-purple" size={20} />
-                Información Personal
-              </CardTitle>
-              <CardDescription>
-                Actualice su información de perfil
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="full_name">Nombre completo</Label>
-                <Input 
-                  id="full_name"
-                  value={user.full_name}
-                  onChange={e => setUser({...user, full_name: e.target.value})}
-                  disabled={!editMode}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="email">Correo electrónico</Label>
-                <Input 
-                  id="email"
-                  type="email"
-                  value={user.email}
-                  disabled={true}
-                />
-                <p className="text-xs text-amber-500 mt-1">
-                  El correo electrónico no se puede modificar
-                </p>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="specialty">Especialidad</Label>
-                <Input 
-                  id="specialty"
-                  value={user.specialty || ''}
-                  onChange={e => setUser({...user, specialty: e.target.value})}
-                  disabled={!editMode}
-                  placeholder="Ej. Cardiología, Pediatría, etc."
-                />
-              </div>
-              
-              {editMode && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="password">Nueva contraseña</Label>
-                    <Input 
-                      id="password"
-                      type="password"
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      placeholder="Dejar en blanco para mantener la actual"
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="confirmPassword">Confirmar contraseña</Label>
-                    <Input 
-                      id="confirmPassword"
-                      type="password"
-                      value={confirmPassword}
-                      onChange={e => setConfirmPassword(e.target.value)}
-                      placeholder="Confirme la nueva contraseña"
-                    />
-                  </div>
-                </>
-              )}
-              
-              <div className="space-y-2">
-                <Label htmlFor="role">Rol</Label>
-                <Input 
-                  id="role"
-                  value={user.role}
-                  disabled={true}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Su rol solo puede ser modificado por un administrador
-                </p>
-              </div>
-            </CardContent>
-            {editMode && (
-              <CardFooter>
-                <Button 
-                  onClick={handleSaveProfile} 
-                  className="ml-auto bg-medical-blue hover:bg-medical-blue/90"
-                >
-                  <Save className="mr-2" size={16} />
-                  Guardar Cambios
-                </Button>
-              </CardFooter>
-            )}
-          </Card>
-        </div>
-      </div>
+          <div className="space-y-2">
+            <Label htmlFor="specialty">Especialidad</Label>
+            <Input 
+              id="specialty" 
+              value={editableProfile.specialty} 
+              onChange={(e) => setEditableProfile({...editableProfile, specialty: e.target.value})}
+              placeholder="Ej: Medicina General, Pediatría, etc."
+            />
+          </div>
+        </CardContent>
+        <CardFooter>
+          <Button 
+            onClick={handleUpdateProfile} 
+            disabled={saving} 
+            className="ml-auto bg-medical-blue hover:bg-medical-blue/90"
+          >
+            {saving ? "Guardando..." : "Guardar cambios"}
+          </Button>
+        </CardFooter>
+      </Card>
     </div>
   );
 };
