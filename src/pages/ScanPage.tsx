@@ -1,6 +1,6 @@
 
 import NavBar from '@/components/NavBar';
-import QRScanner from '@/components/QRScanner';
+import QrScanner from '@/components/qr-scanner';
 
 const ScanPage = () => {
   return (
@@ -13,7 +13,7 @@ const ScanPage = () => {
           <p className="text-gray-600">Escanee el código QR del carnet de identidad para acceder a los datos del paciente</p>
         </div>
         
-        <QRScanner />
+        <QrScanner />
       </main>
     </div>
   );
