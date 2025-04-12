@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
@@ -39,8 +38,9 @@ import {
   UserPlus
 } from 'lucide-react';
 import { toast as sonnerToast } from 'sonner';
-import { db } from '@/db/localDatabase';
+import { db, Patient as DbPatient, MedicalRecord as DbMedicalRecord } from '@/db/localDatabase';
 
+// Updated to match the DB interface
 interface MedicalRecord {
   id?: number;
   patient_id: number;
@@ -48,11 +48,12 @@ interface MedicalRecord {
   diagnosis: string;
   treatment: string;
   medications: string;
-  notes: string | null;
+  notes?: string | null;
   doctor_id: string;
   doctor_name: string;
 }
 
+// Updated to match the DB interface
 interface PatientData {
   id?: number;
   identity_id: string;
@@ -60,9 +61,9 @@ interface PatientData {
   birth_date: string;
   gender: string;
   address: string;
-  phone: string | null;
-  email: string | null;
-  blood_type: string | null;
+  phone?: string | null;
+  email?: string | null;
+  blood_type?: string | null;
   allergies: string[];
   age?: number;
 }
@@ -155,7 +156,8 @@ const PatientMedicalHistory = () => {
         if (foundPatient) {
           // Calculamos la edad
           const age = calculateAge(foundPatient.birth_date);
-          setPatient({ ...foundPatient, age });
+          const patientWithAge: PatientData = { ...foundPatient, age };
+          setPatient(patientWithAge);
           
           // Cargar registros médicos del paciente
           if (foundPatient.id) {
@@ -203,7 +205,20 @@ const PatientMedicalHistory = () => {
       // Ordenar por fecha (más reciente primero)
       records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       
-      setMedicalRecords(records);
+      // Ensure records match our local interface
+      const typedRecords: MedicalRecord[] = records.map(record => ({
+        id: record.id,
+        patient_id: record.patient_id,
+        date: record.date,
+        diagnosis: record.diagnosis,
+        treatment: record.treatment,
+        medications: record.medications,
+        notes: record.notes,
+        doctor_id: record.doctor_id,
+        doctor_name: record.doctor_name
+      }));
+      
+      setMedicalRecords(typedRecords);
     } catch (error) {
       console.error("Error obteniendo registros médicos:", error);
       toast({
@@ -263,7 +278,7 @@ const PatientMedicalHistory = () => {
         : (patient.allergies as unknown as string).split(',').map(item => item.trim());
       
       // Preparar datos del paciente
-      const patientData = {
+      const patientData: DbPatient = {
         identity_id: patient.identity_id,
         name: patient.name,
         birth_date: patient.birth_date,
@@ -314,7 +329,8 @@ const PatientMedicalHistory = () => {
         const updatedPatient = await db.patients.get(patientId);
         if (updatedPatient) {
           const age = calculateAge(updatedPatient.birth_date);
-          setPatient({ ...updatedPatient, age });
+          const patientWithAge: PatientData = { ...updatedPatient, age };
+          setPatient(patientWithAge);
         }
         
         // Si estábamos creando un nuevo paciente, ahora no lo estamos
@@ -365,7 +381,7 @@ const PatientMedicalHistory = () => {
       }
       
       // Crear registro médico
-      const recordData = {
+      const recordData: DbMedicalRecord = {
         patient_id: patient.id,
         date: newRecord.date,
         diagnosis: newRecord.diagnosis,
@@ -385,8 +401,21 @@ const PatientMedicalHistory = () => {
       const savedRecord = await db.medicalRecords.get(recordId);
       
       if (savedRecord) {
+        // Convert to our local interface and add to state
+        const typedRecord: MedicalRecord = {
+          id: savedRecord.id,
+          patient_id: savedRecord.patient_id,
+          date: savedRecord.date,
+          diagnosis: savedRecord.diagnosis,
+          treatment: savedRecord.treatment,
+          medications: savedRecord.medications,
+          notes: savedRecord.notes,
+          doctor_id: savedRecord.doctor_id,
+          doctor_name: savedRecord.doctor_name
+        };
+        
         // Añadir al estado
-        setMedicalRecords([savedRecord, ...medicalRecords]);
+        setMedicalRecords([typedRecord, ...medicalRecords]);
       }
       
       // Reiniciar formulario
