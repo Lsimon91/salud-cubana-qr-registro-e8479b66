@@ -1,7 +1,7 @@
 
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Menu, User, Bell, LogOut, ChevronDown } from "lucide-react";
+import { Menu, User, Bell, LogOut, ChevronDown, Users, QrCode, Activity, Home, Settings } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,6 +66,8 @@ const NavBar = () => {
     navigate('/');
   };
 
+  const isAdmin = userRole === 'Administrador';
+
   return (
     <nav className="bg-white border-b shadow-sm py-3 px-4 md:px-6">
       <div className="max-w-7xl mx-auto flex justify-between items-center">
@@ -76,18 +78,28 @@ const NavBar = () => {
           </Link>
           
           <div className="hidden md:flex ml-10 space-x-6">
-            <Link to="/dashboard" className="text-gray-600 hover:text-medical-blue">
+            <Link to="/dashboard" className="text-gray-600 hover:text-medical-blue flex items-center">
+              <Home className="mr-1" size={16} />
               Dashboard
             </Link>
-            <Link to="/personal" className="text-gray-600 hover:text-medical-blue">
-              Personal
-            </Link>
-            <Link to="/actividad" className="text-gray-600 hover:text-medical-blue">
-              Actividad
-            </Link>
-            <Link to="/escanear" className="text-gray-600 hover:text-medical-blue">
+            <Link to="/escanear" className="text-gray-600 hover:text-medical-blue flex items-center">
+              <QrCode className="mr-1" size={16} />
               Escanear QR
             </Link>
+            <Link to="/actividad" className="text-gray-600 hover:text-medical-blue flex items-center">
+              <Activity className="mr-1" size={16} />
+              Actividad
+            </Link>
+            <Link to="/personal" className="text-gray-600 hover:text-medical-blue flex items-center">
+              <User className="mr-1" size={16} />
+              Personal
+            </Link>
+            {isAdmin && (
+              <Link to="/usuarios" className="text-gray-600 hover:text-medical-blue flex items-center">
+                <Users className="mr-1" size={16} />
+                Usuarios
+              </Link>
+            )}
           </div>
         </div>
 
@@ -114,10 +126,16 @@ const NavBar = () => {
                 </div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="cursor-pointer">
+              <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/perfil')}>
                 <User className="mr-2 h-4 w-4" />
-                <span>Perfil</span>
+                <span>Mi Perfil</span>
               </DropdownMenuItem>
+              {isAdmin && (
+                <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/usuarios')}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  <span>Gestionar Usuarios</span>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem className="cursor-pointer" onClick={handleLogout}>
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Cerrar sesión</span>
@@ -137,18 +155,32 @@ const NavBar = () => {
       {/* Mobile Menu */}
       {isMobileMenuOpen && (
         <div className="md:hidden mt-3 px-4 py-2 bg-white border-t">
-          <Link to="/dashboard" className="block py-2 text-gray-600 hover:text-medical-blue">
+          <Link to="/dashboard" className="block py-2 text-gray-600 hover:text-medical-blue flex items-center">
+            <Home className="mr-2" size={16} />
             Dashboard
           </Link>
-          <Link to="/personal" className="block py-2 text-gray-600 hover:text-medical-blue">
-            Personal
-          </Link>
-          <Link to="/actividad" className="block py-2 text-gray-600 hover:text-medical-blue">
-            Actividad
-          </Link>
-          <Link to="/escanear" className="block py-2 text-gray-600 hover:text-medical-blue">
+          <Link to="/escanear" className="block py-2 text-gray-600 hover:text-medical-blue flex items-center">
+            <QrCode className="mr-2" size={16} />
             Escanear QR
           </Link>
+          <Link to="/actividad" className="block py-2 text-gray-600 hover:text-medical-blue flex items-center">
+            <Activity className="mr-2" size={16} />
+            Actividad
+          </Link>
+          <Link to="/personal" className="block py-2 text-gray-600 hover:text-medical-blue flex items-center">
+            <User className="mr-2" size={16} />
+            Personal
+          </Link>
+          <Link to="/perfil" className="block py-2 text-gray-600 hover:text-medical-blue flex items-center">
+            <Settings className="mr-2" size={16} />
+            Mi Perfil
+          </Link>
+          {isAdmin && (
+            <Link to="/usuarios" className="block py-2 text-gray-600 hover:text-medical-blue flex items-center">
+              <Users className="mr-2" size={16} />
+              Gestionar Usuarios
+            </Link>
+          )}
         </div>
       )}
     </nav>

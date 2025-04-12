@@ -10,6 +10,10 @@ import DashboardPage from "./pages/DashboardPage";
 import ScanPage from "./pages/ScanPage";
 import StaffPage from "./pages/StaffPage";
 import ActivityPage from "./pages/ActivityPage";
+import ProfilePage from "./pages/ProfilePage";
+import UsersPage from "./pages/UsersPage";
+import PatientPage from "./pages/PatientPage";
+import LoginPage from "./pages/LoginPage";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +28,22 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   return children;
 };
 
+// Admin role guard
+const AdminRoute = ({ children }: { children: JSX.Element }) => {
+  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
+  const userRole = localStorage.getItem('userRole');
+  
+  if (!isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
+  
+  if (userRole !== 'Administrador') {
+    return <Navigate to="/dashboard" replace />;
+  }
+  
+  return children;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -31,7 +51,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
+          <Route path="/" element={<LoginPage />} />
           <Route 
             path="/dashboard" 
             element={
@@ -61,6 +81,30 @@ const App = () => (
             element={
               <ProtectedRoute>
                 <ActivityPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/perfil" 
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/usuarios" 
+            element={
+              <AdminRoute>
+                <UsersPage />
+              </AdminRoute>
+            } 
+          />
+          <Route 
+            path="/paciente/:id" 
+            element={
+              <ProtectedRoute>
+                <PatientPage />
               </ProtectedRoute>
             } 
           />
