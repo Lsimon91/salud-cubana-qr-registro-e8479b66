@@ -1,6 +1,6 @@
 
 import NavBar from '@/components/NavBar';
-import QrScanner from '@/components/qr-scanner';
+import QrScanner from '@/components/QrScanner';
 
 const ScanPage = () => {
   return (

@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useToast } from '@/hooks/use-toast';
@@ -309,18 +310,22 @@ const PatientMedicalHistory = () => {
       } else {
         // Actualizar paciente existente
         if (patient.id) {
-          patientData.created_at = (await db.patients.get(patient.id))?.created_at || new Date();
-          await db.patients.update(patient.id, patientData);
-          patientId = patient.id;
-          
-          // Registrar actividad
-          await db.activityLogs.add({
-            action: 'Actualización de Paciente',
-            user_id: userId,
-            user_name: localStorage.getItem('userName') || 'Usuario desconocido',
-            details: `Información del paciente ${patientData.name} (ID: ${patientData.identity_id}) actualizada`,
-            created_at: new Date()
-          });
+          const existingPatient = await db.patients.get(patient.id);
+          // Fix: Use proper update syntax for Dexie
+          if (existingPatient) {
+            patientData.created_at = existingPatient.created_at;
+            await db.patients.update(patient.id, { ...patientData });
+            patientId = patient.id;
+            
+            // Registrar actividad
+            await db.activityLogs.add({
+              action: 'Actualización de Paciente',
+              user_id: userId,
+              user_name: localStorage.getItem('userName') || 'Usuario desconocido',
+              details: `Información del paciente ${patientData.name} (ID: ${patientData.identity_id}) actualizada`,
+              created_at: new Date()
+            });
+          }
         }
       }
       
