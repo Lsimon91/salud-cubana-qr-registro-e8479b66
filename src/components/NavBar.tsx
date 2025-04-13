@@ -1,7 +1,7 @@
 
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Menu, User, Bell, LogOut, ChevronDown, Users, QrCode, Activity, Home, Settings } from "lucide-react";
+import { Menu, User, Bell, LogOut, ChevronDown, Users, QrCode, Activity, Home, Settings, Database, Shield } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -95,9 +95,9 @@ const NavBar = () => {
               Personal
             </Link>
             {isAdmin && (
-              <Link to="/usuarios" className="text-gray-600 hover:text-medical-blue flex items-center">
-                <Users className="mr-1" size={16} />
-                Usuarios
+              <Link to="/admin" className="text-gray-600 hover:text-medical-blue flex items-center">
+                <Shield className="mr-1" size={16} />
+                Administración
               </Link>
             )}
           </div>
@@ -131,11 +131,18 @@ const NavBar = () => {
                 <span>Mi Perfil</span>
               </DropdownMenuItem>
               {isAdmin && (
-                <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/usuarios')}>
-                  <Settings className="mr-2 h-4 w-4" />
-                  <span>Gestionar Usuarios</span>
-                </DropdownMenuItem>
+                <>
+                  <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/admin')}>
+                    <Shield className="mr-2 h-4 w-4" />
+                    <span>Panel Admin</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/usuarios')}>
+                    <Settings className="mr-2 h-4 w-4" />
+                    <span>Gestionar Usuarios</span>
+                  </DropdownMenuItem>
+                </>
               )}
+              <DropdownMenuSeparator />
               <DropdownMenuItem className="cursor-pointer" onClick={handleLogout}>
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Cerrar sesión</span>
@@ -176,10 +183,16 @@ const NavBar = () => {
             Mi Perfil
           </Link>
           {isAdmin && (
-            <Link to="/usuarios" className="block py-2 text-gray-600 hover:text-medical-blue flex items-center">
-              <Users className="mr-2" size={16} />
-              Gestionar Usuarios
-            </Link>
+            <>
+              <Link to="/admin" className="block py-2 text-gray-600 hover:text-medical-blue flex items-center">
+                <Shield className="mr-2" size={16} />
+                Panel Admin
+              </Link>
+              <Link to="/usuarios" className="block py-2 text-gray-600 hover:text-medical-blue flex items-center">
+                <Users className="mr-2" size={16} />
+                Gestionar Usuarios
+              </Link>
+            </>
           )}
         </div>
       )}
