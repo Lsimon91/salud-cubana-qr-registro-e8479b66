@@ -1,400 +1,253 @@
 
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useToast } from '@/hooks/use-toast';
-import { toast as sonnerToast } from 'sonner';
 import { QrReader } from 'react-qr-reader';
+import { toast } from 'sonner';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { 
-  QrCode, 
-  Camera, 
-  UserCheck, 
-  UserX, 
-  UserPlus 
-} from 'lucide-react';
-import { db, Patient } from '@/db/localDatabase';
-
-// Interfaces
-interface ScannedPatientData {
-  id: string;
-  nombre: string;
-  fechaNacimiento: string;
-  genero: string;
-  direccion: string;
-  telefono?: string;
-  email?: string;
-}
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Loader2, Check, QrCode, UserPlus, Search } from 'lucide-react';
+import { db } from '@/db/localDatabase';
 
 const QrScanner = () => {
-  const [scanning, setScanning] = useState(false);
-  const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
-  const [result, setResult] = useState<string | null>(null);
-  const [patientExists, setPatientExists] = useState(false);
-  const [patient, setPatient] = useState<Patient | null>(null);
-  const { toast } = useToast();
   const navigate = useNavigate();
+  const [scanResult, setScanResult] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(true);
+  const [scanStatus, setScanStatus] = useState<'idle' | 'scanning' | 'success' | 'error'>('idle');
+  const [manualId, setManualId] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
+  // Reiniciar el estado al montar el componente
   useEffect(() => {
-    // Verificar permiso de cámara cuando se monta el componente
-    checkCameraPermission();
+    setScanResult(null);
+    setScanStatus('idle');
+    setIsScanning(true);
   }, []);
 
-  const checkCameraPermission = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      // Detener la transmisión después de verificar el permiso
-      stream.getTracks().forEach(track => track.stop());
-      setCameraPermission(true);
-    } catch (error) {
-      console.error("Error al acceder a la cámara:", error);
-      setCameraPermission(false);
-    }
-  };
-
-  const requestCameraPermission = async () => {
-    try {
-      await navigator.mediaDevices.getUserMedia({ video: true })
-        .then(stream => {
-          stream.getTracks().forEach(track => track.stop());
-          setCameraPermission(true);
-          setScanning(true);
-        })
-        .catch(error => {
-          console.error("No se pudo acceder a la cámara", error);
-          setCameraPermission(false);
-          toast({
-            title: "Error de cámara",
-            description: "No se pudo acceder a la cámara. Por favor, verifique los permisos en su navegador.",
-            variant: "destructive",
-          });
-        });
-    } catch (error) {
-      console.error("Error al solicitar permisos de cámara:", error);
-      setCameraPermission(false);
-    }
-  };
-
-  const startScanning = () => {
-    if (cameraPermission) {
-      setScanning(true);
-    } else {
-      requestCameraPermission();
-    }
-  };
-
-  const stopScanning = () => {
-    setScanning(false);
-  };
-
-  const resetScanner = () => {
-    setResult(null);
-    setPatient(null);
-    setPatientExists(false);
-  };
-
-  const handleScan = async (data: any) => {
-    if (data && data.text && !result) {
+  // Manejar el resultado del escaneo
+  const handleScanResult = async (result: string | null) => {
+    if (result && scanStatus !== 'success') {
+      setScanResult(result);
+      setScanStatus('success');
+      setIsScanning(false);
+      toast.success('Código QR escaneado con éxito');
+      
       try {
-        const scannedText = data.text;
-        setResult(scannedText);
-        setScanning(false);
-
-        // Intentar parsear el contenido del QR como JSON
-        let patientData: ScannedPatientData;
-        try {
-          patientData = JSON.parse(scannedText);
-        } catch (e) {
-          // Si no es JSON válido, tratar como un ID simple
-          patientData = {
-            id: scannedText,
-            nombre: "Desconocido",
-            fechaNacimiento: new Date().toISOString().split('T')[0],
-            genero: "No especificado",
-            direccion: "No especificada"
-          };
-        }
-
-        // Buscar paciente en la base de datos local
-        const existingPatient = await db.patients
-          .where('identity_id')
-          .equals(patientData.id)
-          .first();
-
-        if (existingPatient) {
-          setPatientExists(true);
-          setPatient(existingPatient);
-          toast({
-            title: "Paciente encontrado",
-            description: "Se ha encontrado el registro del paciente en el sistema.",
-          });
-        } else {
-          setPatientExists(false);
-          
-          // Calcular edad a partir de la fecha de nacimiento
-          const birthDate = new Date(patientData.fechaNacimiento);
-          const today = new Date();
-          let age = today.getFullYear() - birthDate.getFullYear();
-          const monthDiff = today.getMonth() - birthDate.getMonth();
-          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-            age--;
-          }
-          
-          // Crear nuevo objeto de paciente
-          const newPatient = {
-            identity_id: patientData.id,
-            name: patientData.nombre,
-            birth_date: patientData.fechaNacimiento,
-            gender: patientData.genero,
-            address: patientData.direccion,
-            phone: patientData.telefono || '',
-            email: patientData.email || '',
-            blood_type: '',
-            allergies: [],
-            created_at: new Date(),
-            updated_at: new Date()
-          };
-          
-          setPatient(newPatient);
-          toast({
-            title: "Nuevo paciente",
-            description: "Este paciente no existe en el sistema. Puede registrarlo ahora.",
+        // Verificar si el paciente existe en la base de datos
+        const patient = await db.patients.where('identity_id').equals(result).first();
+        
+        // Registrar actividad
+        const userId = localStorage.getItem('userId');
+        const userName = localStorage.getItem('userName');
+        
+        if (userId && userName) {
+          await db.activityLogs.add({
+            action: 'Escaneo de código QR',
+            user_id: userId,
+            user_name: userName,
+            details: `Código QR ${result} escaneado ${patient ? 'paciente encontrado' : 'paciente no encontrado'}`,
+            created_at: new Date()
           });
         }
+        
+        // Navegar a la página del paciente
+        navigate(`/paciente/${result}`);
       } catch (error) {
-        console.error("Error procesando el código QR:", error);
-        toast({
-          title: "Error",
-          description: "No se pudo procesar el código QR. Inténtelo de nuevo.",
-          variant: "destructive",
-        });
-        resetScanner();
+        console.error('Error al procesar el código QR:', error);
+        toast.error('Error al procesar el código QR');
       }
     }
   };
 
-  const registerVisit = () => {
-    // Solo redirigir a la página del paciente
-    if (patient) {
-      navigate(`/paciente/${patient.identity_id}`);
-    }
+  // Manejar errores del escáner
+  const handleScanError = (error: Error) => {
+    console.error('Error al escanear código QR:', error);
+    setScanStatus('error');
+    toast.error('Error al acceder a la cámara. Por favor, verifica los permisos.');
   };
 
-  const createNewPatient = async () => {
-    if (!patient) return;
+  // Manejar la búsqueda manual
+  const handleManualSearch = async () => {
+    if (!manualId.trim()) {
+      toast.error('Ingrese un número de identificación válido');
+      return;
+    }
+    
+    setIsSearching(true);
     
     try {
-      // Obtener el usuario actual
-      const userId = localStorage.getItem('userId') || 'unknown';
-      const userName = localStorage.getItem('userName') || 'Usuario desconocido';
-      
-      // Guardar el paciente en la base de datos
-      const patientId = await db.patients.add(patient);
-      
       // Registrar actividad
-      await db.activityLogs.add({
-        action: 'Registro de Paciente',
-        user_id: userId,
-        user_name: userName,
-        details: `Paciente ${patient.name} (ID: ${patient.identity_id}) registrado`,
-        created_at: new Date()
-      });
+      const userId = localStorage.getItem('userId');
+      const userName = localStorage.getItem('userName');
       
-      toast({
-        title: "Paciente registrado",
-        description: "Se ha registrado el paciente en el sistema.",
-      });
-      
-      sonnerToast.success("Paciente añadido a la base de datos");
+      if (userId && userName) {
+        await db.activityLogs.add({
+          action: 'Búsqueda manual de paciente',
+          user_id: userId,
+          user_name: userName,
+          details: `Búsqueda manual con ID: ${manualId}`,
+          created_at: new Date()
+        });
+      }
       
       // Navegar a la página del paciente
-      navigate(`/paciente/${patient.identity_id}`);
+      navigate(`/paciente/${manualId}`);
     } catch (error) {
-      console.error("Error guardando paciente:", error);
-      toast({
-        title: "Error al registrar",
-        description: "No se pudo registrar el paciente. Intente nuevamente.",
-        variant: "destructive",
-      });
+      console.error('Error en búsqueda manual:', error);
+      toast.error('Error al realizar la búsqueda');
+    } finally {
+      setIsSearching(false);
     }
   };
 
-  // Rendering components
-  const ScannerHeader = () => (
-    <div className="text-center mb-6">
-      <div className="inline-flex items-center justify-center p-3 bg-medical-blue/10 rounded-full mb-3">
-        <QrCode size={28} className="text-medical-blue" />
-      </div>
-      <h2 className="text-2xl font-bold text-gray-800">Escanear Carnet de Identidad</h2>
-      <p className="text-gray-600 mt-1">Escanee el código QR del carnet para acceder a los datos del paciente</p>
-    </div>
-  );
+  // Reiniciar el escáner
+  const handleReset = () => {
+    setScanResult(null);
+    setScanStatus('idle');
+    setIsScanning(true);
+  };
 
-  const CameraPermission = () => (
-    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
-      <div className="flex">
-        <div className="ml-3">
-          <p className="text-yellow-700">
-            No se pudo acceder a la cámara. Por favor, conceda permisos de cámara y haga clic en "Solicitar acceso a cámara".
-          </p>
-          <Button 
-            onClick={requestCameraPermission} 
-            variant="outline" 
-            className="mt-2"
-          >
-            Solicitar acceso a cámara
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const ScannerControls = () => (
-    <div className="flex justify-center">
-      {scanning ? (
-        <Button variant="outline" onClick={stopScanning} className="px-6">
-          Cancelar
-        </Button>
-      ) : (
-        <Button 
-          onClick={startScanning} 
-          className="bg-medical-blue hover:bg-medical-blue/90 px-6"
-          disabled={cameraPermission === false}
-        >
-          Iniciar escaneo
-        </Button>
-      )}
-    </div>
-  );
-
-  const QrReaderContainer = () => (
-    <div className="bg-gray-100 aspect-video rounded-lg overflow-hidden mb-4">
-      {scanning ? (
-        <QrReader
-          constraints={{ facingMode: 'environment' }}
-          onResult={handleScan}
-          scanDelay={500}
-          videoStyle={{ width: '100%', height: 'auto' }}
-          videoContainerStyle={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
-          videoId="qr-reader-video"
-        />
-      ) : (
-        <div className="h-full flex flex-col items-center justify-center">
-          <Camera size={64} className="text-gray-400 mb-3" />
-          <p className="text-gray-500">La cámara se activará al iniciar el escaneo</p>
-        </div>
-      )}
-    </div>
-  );
-
-  const PatientDataDisplay = () => {
-    if (!patient) return null;
-
-    return (
-      <div className="p-4 bg-white rounded-lg shadow-md">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-800">Datos del Paciente</h3>
-          <div className="flex items-center space-x-2">
-            <Button size="sm" variant="outline" onClick={resetScanner}>
-              Escanear otro
-            </Button>
-            {patientExists ? (
-              <Button 
-                size="sm" 
-                className="bg-medical-teal hover:bg-medical-teal/90"
-                onClick={registerVisit}
-              >
-                <UserCheck className="mr-2 h-4 w-4" />
-                Ver historial
-              </Button>
-            ) : (
-              <Button 
-                size="sm" 
-                className="bg-medical-purple hover:bg-medical-purple/90"
-                onClick={createNewPatient}
-              >
-                <UserPlus className="mr-2 h-4 w-4" />
-                Registrar paciente
-              </Button>
-            )}
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm text-gray-500">ID</p>
-            <p className="font-medium">{patient.identity_id}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Nombre</p>
-            <p className="font-medium">{patient.name}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Fecha de Nacimiento</p>
-            <p className="font-medium">{patient.birth_date}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Género</p>
-            <p className="font-medium">{patient.gender}</p>
-          </div>
-          <div className="md:col-span-2">
-            <p className="text-sm text-gray-500">Dirección</p>
-            <p className="font-medium">{patient.address}</p>
-          </div>
-        </div>
-        
-        {patientExists && (
-          <div className="mt-6">
-            <h4 className="font-medium text-gray-700 mb-2">Historial Médico</h4>
-            <div className="mt-3">
-              <Button
-                className="bg-medical-blue hover:bg-medical-blue/90"
-                onClick={registerVisit}
-              >
-                Ver Historial Completo
-              </Button>
-            </div>
-          </div>
-        )}
-        
-        {!patientExists && (
-          <div className="mt-6">
-            <h4 className="font-medium text-gray-700 mb-2">Registro de Paciente</h4>
-            <p className="text-sm text-gray-600 italic">
-              Este paciente no existe en el sistema. ¿Desea crear un nuevo registro?
-            </p>
-            <div className="mt-3">
-              <Button variant="outline" className="mr-2" onClick={resetScanner}>
-                <UserX className="mr-2 h-4 w-4" />
-                No registrar
-              </Button>
-              <Button 
-                className="bg-medical-blue hover:bg-medical-blue/90"
-                onClick={createNewPatient}
-              >
-                Crear nuevo registro
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
+  // Crear nuevo paciente
+  const handleCreateNewPatient = () => {
+    if (scanResult) {
+      navigate(`/paciente/new-patient?id=${scanResult}`);
+    } else {
+      navigate('/paciente/new-patient');
+    }
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto bg-white p-6 rounded-xl shadow-sm">
-      <ScannerHeader />
-
-      {cameraPermission === false && <CameraPermission />}
-
-      {!result ? (
-        <>
-          <QrReaderContainer />
-          {!result && <ScannerControls />}
-        </>
-      ) : (
-        <PatientDataDisplay />
-      )}
-    </div>
+    <Card className="w-full max-w-3xl mx-auto shadow-lg">
+      <Tabs defaultValue="scanner" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="scanner">Escanear QR</TabsTrigger>
+          <TabsTrigger value="manual">Búsqueda Manual</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="scanner" className="p-0">
+          <CardContent className="p-0 overflow-hidden">
+            <div className="p-4 bg-blue-50 border-b border-blue-100">
+              <h3 className="text-lg font-medium text-blue-800 mb-1">Escáner de Código QR</h3>
+              <p className="text-sm text-blue-600">
+                Alinee el código QR del paciente con la cámara para escanearlo
+              </p>
+            </div>
+            
+            {isScanning && (
+              <div className="relative">
+                <QrReader
+                  constraints={{ facingMode: 'environment' }}
+                  onResult={(result) => {
+                    if (result) {
+                      handleScanResult(result.getText());
+                    }
+                  }}
+                  scanDelay={500}
+                  className="w-full"
+                  videoContainerStyle={{ 
+                    borderRadius: '0', 
+                    paddingTop: '100%',
+                  }}
+                  videoStyle={{ 
+                    objectFit: 'cover',
+                    borderRadius: '0',
+                  }}
+                />
+                
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-1/2 h-1/2 border-2 border-white border-opacity-70 rounded-lg"></div>
+                </div>
+                
+                {scanStatus === 'error' && (
+                  <div className="absolute inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center text-white p-6">
+                    <p className="text-center mb-4">
+                      No se pudo acceder a la cámara. Verifique los permisos de su navegador.
+                    </p>
+                    <Button onClick={handleReset} className="mt-2">
+                      Reintentar
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {!isScanning && scanResult && (
+              <div className="p-6 flex flex-col items-center justify-center">
+                <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mb-4">
+                  <Check className="h-8 w-8 text-green-600" />
+                </div>
+                <h3 className="text-lg font-medium mb-2 text-center">Código QR escaneado correctamente</h3>
+                <p className="text-sm text-gray-500 mb-4 text-center">
+                  ID: {scanResult}
+                </p>
+                <div className="flex space-x-4">
+                  <Button onClick={handleReset} variant="outline">
+                    Escanear otro
+                  </Button>
+                </div>
+              </div>
+            )}
+            
+            <div className="p-4 flex flex-col items-center border-t">
+              <Button 
+                onClick={handleCreateNewPatient}
+                className="w-full bg-medical-teal hover:bg-medical-teal/90 mt-2"
+              >
+                <UserPlus className="mr-2 h-4 w-4" />
+                Registrar Nuevo Paciente
+              </Button>
+            </div>
+          </CardContent>
+        </TabsContent>
+        
+        <TabsContent value="manual">
+          <CardContent className="p-6">
+            <div className="mb-6">
+              <h3 className="text-lg font-medium mb-2">Búsqueda Manual</h3>
+              <p className="text-sm text-gray-500">
+                Ingrese el número de identificación del paciente
+              </p>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <QrCode className="text-gray-400" size={20} />
+                <Input
+                  placeholder="Número de identificación"
+                  value={manualId}
+                  onChange={(e) => setManualId(e.target.value)}
+                />
+              </div>
+              
+              <Button
+                className="w-full bg-medical-blue hover:bg-medical-blue/90"
+                onClick={handleManualSearch}
+                disabled={isSearching || !manualId.trim()}
+              >
+                {isSearching ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="mr-2 h-4 w-4" />
+                )}
+                Buscar Paciente
+              </Button>
+              
+              <div className="mt-6 pt-4 border-t border-gray-100">
+                <Button
+                  onClick={handleCreateNewPatient}
+                  variant="outline"
+                  className="w-full border-medical-teal text-medical-teal hover:bg-medical-teal/10"
+                >
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  Registrar Nuevo Paciente
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </TabsContent>
+      </Tabs>
+    </Card>
   );
 };
 

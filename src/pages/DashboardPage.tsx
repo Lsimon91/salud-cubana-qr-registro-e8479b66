@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import NavBar from '@/components/NavBar';
 import StatsCard from '@/components/StatsCard';
 import PatientCard from '@/components/PatientCard';
@@ -16,48 +16,127 @@ import {
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Link } from 'react-router-dom';
+import { db, Patient, MedicalRecord, ActivityLog, stats, StatsData } from '@/db/localDatabase';
 
-// Mock patient data
-const mockPatients = [
-  {
-    id: "89061223456",
-    nombre: "Carlos Rodríguez",
-    edad: 34,
-    genero: "Masculino",
-    ultimaVisita: "10/04/2023",
-    diagnosticos: ["Hipertensión arterial", "Diabetes tipo 2"],
-    tratamientos: ["Control de presión arterial", "Dieta baja en carbohidratos"],
-    medicamentos: ["Enalapril 10mg", "Metformina 500mg"],
-  },
-  {
-    id: "76052334567",
-    nombre: "Ana Díaz",
-    edad: 58,
-    genero: "Femenino",
-    ultimaVisita: "08/04/2023",
-    diagnosticos: ["Artritis reumatoide"],
-    tratamientos: ["Fisioterapia", "Antiinflamatorios"],
-    medicamentos: ["Prednisona 5mg", "Metotrexato 7.5mg semanal"],
-  },
-  {
-    id: "92030545678",
-    nombre: "Miguel Santos",
-    edad: 29,
-    genero: "Masculino",
-    ultimaVisita: "05/04/2023",
-    diagnosticos: ["Asma bronquial"],
-    tratamientos: ["Terapia inhalatoria", "Evitar alergenos"],
-    medicamentos: ["Salbutamol inhalador", "Fluticasona inhalador"],
-  }
-];
+interface PatientWithData {
+  id: string;
+  nombre: string;
+  edad: number;
+  genero: string;
+  ultimaVisita: string;
+  diagnosticos: string[];
+  tratamientos: string[];
+  medicamentos: string[];
+}
 
 const DashboardPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [patients, setPatients] = useState<PatientWithData[]>([]);
+  const [recentActivities, setRecentActivities] = useState<ActivityLog[]>([]);
+  const [statsData, setStatsData] = useState<StatsData>({
+    patientsCount: 0,
+    consultationsCount: 0,
+    upcomingAppointments: 0,
+    urgentCases: 0
+  });
+  const [loading, setLoading] = useState(true);
   
-  const filteredPatients = mockPatients.filter(patient => 
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      try {
+        // Cargar estadísticas
+        const dashboardStats = await stats.getStats();
+        setStatsData(dashboardStats);
+        
+        // Cargar pacientes recientes
+        const dbPatients = await db.patients.toArray();
+        const patientIds = dbPatients.map(p => p.id).filter(id => id !== undefined) as number[];
+        
+        // Obtener los registros médicos más recientes para cada paciente
+        const patientData: PatientWithData[] = [];
+        
+        for (const patient of dbPatients) {
+          if (patient.id) {
+            // Calcular edad
+            const birthDate = new Date(patient.birth_date);
+            const today = new Date();
+            let age = today.getFullYear() - birthDate.getFullYear();
+            const m = today.getMonth() - birthDate.getMonth();
+            if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+              age--;
+            }
+            
+            // Obtener el registro médico más reciente
+            const medicalRecords = await db.medicalRecords
+              .where('patient_id')
+              .equals(patient.id)
+              .reverse()
+              .sortBy('date');
+            
+            const lastRecord = medicalRecords[0];
+            
+            patientData.push({
+              id: patient.identity_id,
+              nombre: patient.name,
+              edad: age,
+              genero: patient.gender,
+              ultimaVisita: lastRecord ? lastRecord.date : 'Sin visitas',
+              diagnosticos: lastRecord ? lastRecord.diagnosis.split(',').map(d => d.trim()) : [],
+              tratamientos: lastRecord ? lastRecord.treatment.split(',').map(t => t.trim()) : [],
+              medicamentos: lastRecord ? lastRecord.medications.split(',').map(m => m.trim()) : [],
+            });
+          }
+        }
+        
+        setPatients(patientData);
+        
+        // Cargar actividades recientes
+        const activities = await db.activityLogs
+          .orderBy('created_at')
+          .reverse()
+          .limit(10)
+          .toArray();
+        
+        setRecentActivities(activities);
+      } catch (error) {
+        console.error('Error cargando datos del dashboard:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadDashboardData();
+  }, []);
+  
+  const filteredPatients = patients.filter(patient => 
     patient.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
     patient.id.includes(searchTerm)
   );
+
+  // Función para formatear la fecha relativa
+  const getRelativeTime = (date: Date) => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+    
+    if (diffMins < 1) return 'Hace un momento';
+    if (diffMins < 60) return `Hace ${diffMins} minutos`;
+    if (diffHours < 24) return `Hace ${diffHours} horas`;
+    return `Hace ${diffDays} días`;
+  };
+
+  // Función para obtener el icono para la actividad
+  const getActivityIcon = (action: string) => {
+    if (action.includes('Escaneo') || action.includes('QR')) {
+      return <QrCode size={16} className="text-medical-blue" />;
+    } else if (action.includes('Actualización') || action.includes('Registro Médico')) {
+      return <Stethoscope size={16} className="text-medical-teal" />;
+    } else {
+      return <Activity size={16} className="text-medical-purple" />;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -77,7 +156,7 @@ const DashboardPage = () => {
                 Escanear QR
               </Button>
             </Link>
-            <Link to="/pacientes/nuevo">
+            <Link to="/paciente/new-patient">
               <Button variant="outline">
                 <PlusCircle className="mr-2 h-4 w-4" />
                 Nuevo Paciente
@@ -89,29 +168,29 @@ const DashboardPage = () => {
         {/* Stats Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatsCard 
-            title="Pacientes Atendidos" 
-            value="128" 
-            description="Últimos 30 días" 
+            title="Pacientes Registrados" 
+            value={statsData.patientsCount.toString()} 
+            description="Total en la base de datos" 
             icon={<Users size={24} />} 
             color="blue" 
           />
           <StatsCard 
             title="Consultas Realizadas" 
-            value="254" 
+            value={statsData.consultationsCount.toString()} 
             description="Últimos 30 días" 
             icon={<Stethoscope size={24} />} 
             color="teal" 
           />
           <StatsCard 
             title="Próximas Citas" 
-            value="18" 
+            value={statsData.upcomingAppointments.toString()} 
             description="Próximos 7 días" 
             icon={<CalendarClock size={24} />} 
             color="purple" 
           />
           <StatsCard 
             title="Casos Urgentes" 
-            value="3" 
+            value={statsData.urgentCases.toString()} 
             description="Atención inmediata requerida" 
             icon={<Activity size={24} />} 
             color="red" 
@@ -140,17 +219,23 @@ const DashboardPage = () => {
             </div>
             
             <TabsContent value="recientes" className="mt-0">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-                {filteredPatients.length > 0 ? (
-                  filteredPatients.map(patient => (
-                    <PatientCard key={patient.id} patient={patient} />
-                  ))
-                ) : (
-                  <div className="col-span-2 py-8 text-center">
-                    <p className="text-gray-500">No se encontraron pacientes que coincidan con la búsqueda</p>
-                  </div>
-                )}
-              </div>
+              {loading ? (
+                <div className="py-12 flex justify-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-medical-blue"></div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  {filteredPatients.length > 0 ? (
+                    filteredPatients.map(patient => (
+                      <PatientCard key={patient.id} patient={patient} />
+                    ))
+                  ) : (
+                    <div className="col-span-2 py-8 text-center">
+                      <p className="text-gray-500">No se encontraron pacientes que coincidan con la búsqueda</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </TabsContent>
             
             <TabsContent value="urgentes" className="mt-0">
@@ -171,48 +256,40 @@ const DashboardPage = () => {
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-lg font-medium text-gray-800 mb-4">Actividad Reciente</h3>
           
-          <div className="space-y-3">
-            <div className="flex items-start pb-3 border-b border-gray-100">
-              <div className="p-2 rounded-full bg-blue-100 mr-3">
-                <QrCode size={16} className="text-medical-blue" />
-              </div>
-              <div>
-                <p className="text-sm">
-                  <span className="font-medium">Dra. María González</span> escaneó el QR del paciente Carlos Rodríguez
-                </p>
-                <p className="text-xs text-gray-500 mt-1">Hace 20 minutos</p>
-              </div>
+          {loading ? (
+            <div className="py-8 flex justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-medical-blue"></div>
             </div>
-            
-            <div className="flex items-start pb-3 border-b border-gray-100">
-              <div className="p-2 rounded-full bg-green-100 mr-3">
-                <Stethoscope size={16} className="text-medical-teal" />
-              </div>
-              <div>
-                <p className="text-sm">
-                  <span className="font-medium">Dr. Carlos Rodríguez</span> actualizó el diagnóstico de Miguel Santos
-                </p>
-                <p className="text-xs text-gray-500 mt-1">Hace 2 horas</p>
-              </div>
+          ) : (
+            <div className="space-y-3">
+              {recentActivities.length > 0 ? (
+                recentActivities.slice(0, 3).map((activity, index) => (
+                  <div key={activity.id || index} className="flex items-start pb-3 border-b border-gray-100">
+                    <div className="p-2 rounded-full bg-blue-100 mr-3">
+                      {getActivityIcon(activity.action)}
+                    </div>
+                    <div>
+                      <p className="text-sm">
+                        <span className="font-medium">{activity.user_name}</span> {activity.action.toLowerCase()}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">{getRelativeTime(activity.created_at)}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-6">
+                  <p className="text-gray-500">No hay actividades registradas</p>
+                </div>
+              )}
             </div>
-            
-            <div className="flex items-start">
-              <div className="p-2 rounded-full bg-purple-100 mr-3">
-                <Activity size={16} className="text-medical-purple" />
-              </div>
-              <div>
-                <p className="text-sm">
-                  <span className="font-medium">Enf. Juan Pérez</span> registró los signos vitales de Ana Díaz
-                </p>
-                <p className="text-xs text-gray-500 mt-1">Hace 3 horas</p>
-              </div>
-            </div>
-          </div>
+          )}
           
           <div className="mt-4 text-center">
-            <Button variant="ghost" size="sm" className="text-medical-blue">
-              Ver todo el historial de actividades
-            </Button>
+            <Link to="/actividad">
+              <Button variant="ghost" size="sm" className="text-medical-blue">
+                Ver todo el historial de actividades
+              </Button>
+            </Link>
           </div>
         </div>
       </main>

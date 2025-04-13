@@ -62,6 +62,14 @@ export interface StaffMember {
   updated_at: Date;
 }
 
+// Stats interfaces
+export interface StatsData {
+  patientsCount: number;
+  consultationsCount: number;
+  upcomingAppointments: number;
+  urgentCases: number;
+}
+
 // Definir la clase de la base de datos
 class MedicalDB extends Dexie {
   patients!: Table<Patient, number>;
@@ -115,6 +123,130 @@ export async function initializeDatabase() {
   // Guardar usuarios
   await db.users.bulkAdd([adminUser, doctorUser]);
 
+  // Crear algunos miembros del personal
+  const staffMembers = [
+    {
+      nombre: 'Dra. María Torres',
+      rol: 'Doctor',
+      especialidad: 'Cardiología',
+      email: 'mtorres@ejemplo.com',
+      telefono: '555-1234',
+      estado: 'Activo',
+      created_at: new Date(),
+      updated_at: new Date()
+    },
+    {
+      nombre: 'Jorge Ramirez',
+      rol: 'Enfermero',
+      especialidad: 'Cuidados Intensivos',
+      email: 'jramirez@ejemplo.com',
+      telefono: '555-5678',
+      estado: 'Activo',
+      created_at: new Date(),
+      updated_at: new Date()
+    },
+    {
+      nombre: 'Lic. Ana Silva',
+      rol: 'Técnico',
+      especialidad: 'Laboratorio',
+      email: 'asilva@ejemplo.com',
+      telefono: '555-9012',
+      estado: 'Activo',
+      created_at: new Date(),
+      updated_at: new Date()
+    }
+  ];
+  
+  await db.staff.bulkAdd(staffMembers);
+
+  // Crear algunos pacientes de ejemplo
+  const patients = [
+    {
+      identity_id: "89061223456",
+      name: "Carlos Rodríguez",
+      birth_date: "1989-06-12",
+      gender: "Masculino",
+      address: "Calle Principal 123",
+      phone: "555-1234",
+      email: "carlos@ejemplo.com",
+      blood_type: "O+",
+      allergies: ["Penicilina", "Maní"],
+      created_at: new Date(),
+      updated_at: new Date()
+    },
+    {
+      identity_id: "76052334567",
+      name: "Ana Díaz",
+      birth_date: "1976-05-23",
+      gender: "Femenino",
+      address: "Avenida Central 456",
+      phone: "555-5678",
+      email: "ana@ejemplo.com",
+      blood_type: "A-",
+      allergies: ["Sulfamidas"],
+      created_at: new Date(),
+      updated_at: new Date()
+    },
+    {
+      identity_id: "92030545678",
+      name: "Miguel Santos",
+      birth_date: "1992-03-05",
+      gender: "Masculino",
+      address: "Plaza Mayor 789",
+      phone: "555-9012",
+      email: "miguel@ejemplo.com",
+      blood_type: "B+",
+      allergies: ["Polen", "Ácaros"],
+      created_at: new Date(),
+      updated_at: new Date()
+    }
+  ];
+  
+  // Guardar pacientes
+  const patientIds = await db.patients.bulkAdd(patients, { allKeys: true });
+  
+  // Crear algunos registros médicos
+  const medicalRecords = [
+    {
+      patient_id: patientIds[0] as number,
+      date: "2023-04-10",
+      diagnosis: "Hipertensión arterial, Diabetes tipo 2",
+      treatment: "Control de presión arterial, Dieta baja en carbohidratos",
+      medications: "Enalapril 10mg, Metformina 500mg",
+      notes: "Paciente responde bien al tratamiento actual",
+      doctor_id: doctorUser.id,
+      doctor_name: doctorUser.full_name,
+      created_at: new Date(),
+      updated_at: new Date()
+    },
+    {
+      patient_id: patientIds[1] as number,
+      date: "2023-04-08",
+      diagnosis: "Artritis reumatoide",
+      treatment: "Fisioterapia, Antiinflamatorios",
+      medications: "Prednisona 5mg, Metotrexato 7.5mg semanal",
+      notes: "Programar revisión en 3 meses",
+      doctor_id: doctorUser.id,
+      doctor_name: doctorUser.full_name,
+      created_at: new Date(),
+      updated_at: new Date()
+    },
+    {
+      patient_id: patientIds[2] as number,
+      date: "2023-04-05",
+      diagnosis: "Asma bronquial",
+      treatment: "Terapia inhalatoria, Evitar alergenos",
+      medications: "Salbutamol inhalador, Fluticasona inhalador",
+      notes: "Control mensual recomendado",
+      doctor_id: doctorUser.id,
+      doctor_name: doctorUser.full_name,
+      created_at: new Date(),
+      updated_at: new Date()
+    }
+  ];
+  
+  await db.medicalRecords.bulkAdd(medicalRecords);
+
   // Crear log de inicialización
   await db.activityLogs.add({
     action: 'Inicialización del Sistema',
@@ -126,6 +258,39 @@ export async function initializeDatabase() {
 
   console.log('Base de datos inicializada con éxito');
 }
+
+// Funciones para obtener estadísticas
+export const stats = {
+  async getStats(): Promise<StatsData> {
+    const now = new Date();
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(now.getDate() - 30);
+    
+    const sevenDaysAhead = new Date();
+    sevenDaysAhead.setDate(now.getDate() + 7);
+    
+    // Contar pacientes
+    const patientsCount = await db.patients.count();
+    
+    // Contar consultas (registros médicos) de los últimos 30 días
+    const consultationsCount = await db.medicalRecords
+      .where('date')
+      .aboveOrEqual(thirtyDaysAgo.toISOString().split('T')[0])
+      .count();
+    
+    // Para casos urgentes y citas, en una app real estos vendrían de tablas específicas
+    // Aquí simplemente proporcionamos datos simulados
+    const upcomingAppointments = 18;
+    const urgentCases = 3;
+    
+    return {
+      patientsCount,
+      consultationsCount,
+      upcomingAppointments,
+      urgentCases
+    };
+  }
+};
 
 // Exportar funciones de utilidad para la autenticación
 export const auth = {

@@ -1,31 +1,18 @@
 
 import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { 
   Table, 
   TableBody, 
+  TableCaption, 
   TableCell, 
   TableHead, 
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
-import { 
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { 
-  Edit, 
-  Trash2, 
-  MoreVertical, 
-  ChevronLeft, 
-  ChevronRight,
-  UserPlus
-} from 'lucide-react';
-import { 
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -33,424 +20,463 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from '@/components/ui/dialog';
 import { 
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { db } from '@/db/localDatabase';
-
-// Define the interface for staff
-interface StaffMember {
-  id?: number;
-  nombre: string;
-  rol: string;
-  especialidad: string;
-  email: string;
-  telefono: string;
-  estado: string;
-  created_at?: Date;
-  updated_at?: Date;
-}
+import { 
+  PlusCircle, 
+  Pencil, 
+  Trash2, 
+  Search, 
+  X, 
+  UserPlus 
+} from 'lucide-react';
+import { db, StaffMember } from '@/db/localDatabase';
 
 const StaffTable = () => {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [newStaff, setNewStaff] = useState<Omit<StaffMember, 'id' | 'estado' | 'created_at' | 'updated_at'>>({
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [currentStaff, setCurrentStaff] = useState<StaffMember | null>(null);
+  const [formData, setFormData] = useState({
     nombre: '',
-    rol: '',
+    rol: 'Doctor',
     especialidad: '',
     email: '',
     telefono: '',
+    estado: 'Activo'
   });
   const { toast } = useToast();
-  
-  const itemsPerPage = 5;
-  const totalPages = Math.ceil(staff.length / itemsPerPage);
-  
-  // Load staff data from the database on component mount
+
+  // Cargar personal
   useEffect(() => {
-    const loadStaffData = async () => {
+    const loadStaff = async () => {
       try {
-        // Check if we have a staff table, if not create it
-        if (!db.tables.some(table => table.name === 'staff')) {
-          db.version(db.verno + 1).stores({
-            staff: '++id, rol, email'
-          });
-          await db.open();
-        }
-        
-        // Try to load staff data
-        let staffData: StaffMember[] = [];
-        
-        try {
-          // @ts-ignore - This is a dynamic table that might not exist in the TypeScript definitions
-          staffData = await db.staff.toArray();
-        } catch (err) {
-          console.error("Error loading staff data:", err);
-          // If there's an error, use mock data
-          staffData = [
-            {
-              id: 1,
-              nombre: 'Dra. María González',
-              rol: 'Médico',
-              especialidad: 'Cardiología',
-              email: 'maria.gonzalez@salud.cu',
-              telefono: '5355123456',
-              estado: 'Activo',
-              created_at: new Date(),
-              updated_at: new Date()
-            },
-            {
-              id: 2,
-              nombre: 'Enf. Juan Pérez',
-              rol: 'Enfermero',
-              especialidad: 'Emergencias',
-              email: 'juan.perez@salud.cu',
-              telefono: '5356789012',
-              estado: 'Activo',
-              created_at: new Date(),
-              updated_at: new Date()
-            },
-            {
-              id: 3,
-              nombre: 'Tec. Laura Martínez',
-              rol: 'Técnico',
-              especialidad: 'Radiología',
-              email: 'laura.martinez@salud.cu',
-              telefono: '5357890123',
-              estado: 'Activo',
-              created_at: new Date(),
-              updated_at: new Date()
-            },
-            {
-              id: 4,
-              nombre: 'Dr. Carlos Rodríguez',
-              rol: 'Médico',
-              especialidad: 'Pediatría',
-              email: 'carlos.rodriguez@salud.cu',
-              telefono: '5358901234',
-              estado: 'Inactivo',
-              created_at: new Date(),
-              updated_at: new Date()
-            },
-            {
-              id: 5,
-              nombre: 'Adm. Sofía Hernández',
-              rol: 'Administrador',
-              especialidad: 'Sistemas',
-              email: 'sofia.hernandez@salud.cu',
-              telefono: '5359012345',
-              estado: 'Activo',
-              created_at: new Date(),
-              updated_at: new Date()
-            }
-          ];
-          
-          // Add mock data to the database
-          try {
-            // @ts-ignore - This is a dynamic table
-            await db.staff.bulkAdd(staffData);
-          } catch (addErr) {
-            console.error("Error adding mock staff data:", addErr);
-          }
-        }
-        
-        setStaff(staffData);
+        const staffMembers = await db.staff.toArray();
+        setStaff(staffMembers);
       } catch (error) {
-        console.error("Error in loadStaffData:", error);
+        console.error('Error cargando personal:', error);
         toast({
-          title: "Error al cargar datos",
-          description: "No se pudieron cargar los datos del personal médico",
-          variant: "destructive",
+          title: 'Error',
+          description: 'No se pudo cargar la lista de personal',
+          variant: 'destructive',
         });
       } finally {
         setLoading(false);
       }
     };
-    
-    loadStaffData();
+
+    loadStaff();
   }, [toast]);
-  
-  const handleEditStaff = (id: number) => {
-    // In a real app, this would open an edit dialog
-    console.log(`Editar personal con ID: ${id}`);
+
+  // Filtrar personal según término de búsqueda
+  const filteredStaff = staff.filter(member => 
+    member.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    member.rol.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    member.especialidad.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    member.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  // Abrir diálogo para editar
+  const handleEdit = (staffMember: StaffMember) => {
+    setCurrentStaff(staffMember);
+    setFormData({
+      nombre: staffMember.nombre,
+      rol: staffMember.rol,
+      especialidad: staffMember.especialidad,
+      email: staffMember.email,
+      telefono: staffMember.telefono,
+      estado: staffMember.estado
+    });
+    setDialogOpen(true);
   };
-  
-  const handleDeleteStaff = async (id: number) => {
+
+  // Abrir diálogo para nuevo miembro
+  const handleNew = () => {
+    setCurrentStaff(null);
+    setFormData({
+      nombre: '',
+      rol: 'Doctor',
+      especialidad: '',
+      email: '',
+      telefono: '',
+      estado: 'Activo'
+    });
+    setDialogOpen(true);
+  };
+
+  // Eliminar miembro
+  const handleDelete = async (id?: number) => {
+    if (!id) return;
+
     try {
-      // Delete from the database
-      // @ts-ignore - This is a dynamic table
       await db.staff.delete(id);
-      
-      // Update state
-      setStaff(staff.filter(s => s.id !== id));
-      
+      setStaff(staff.filter(member => member.id !== id));
       toast({
-        title: "Personal eliminado",
-        description: "El miembro del personal ha sido eliminado exitosamente",
+        title: 'Personal eliminado',
+        description: 'El miembro del personal ha sido eliminado exitosamente',
       });
     } catch (error) {
-      console.error("Error eliminando personal:", error);
+      console.error('Error eliminando personal:', error);
       toast({
-        title: "Error al eliminar",
-        description: "No se pudo eliminar el miembro del personal",
-        variant: "destructive",
+        title: 'Error',
+        description: 'No se pudo eliminar al miembro del personal',
+        variant: 'destructive',
       });
     }
   };
-  
-  const handleAddStaff = async () => {
+
+  // Manejar cambios en el formulario
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData({
+      ...formData,
+      [name]: value
+    });
+  };
+
+  // Manejar cambios en select
+  const handleSelectChange = (name: string, value: string) => {
+    setFormData({
+      ...formData,
+      [name]: value
+    });
+  };
+
+  // Guardar cambios
+  const handleSave = async () => {
+    // Validar campos obligatorios
+    if (!formData.nombre || !formData.rol || !formData.email) {
+      toast({
+        title: 'Campos incompletos',
+        description: 'Por favor complete los campos obligatorios',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
-      const staffRecord: StaffMember = {
-        ...newStaff,
-        estado: 'Activo',
-        created_at: new Date(),
-        updated_at: new Date()
-      };
-      
-      // Add to the database
-      // @ts-ignore - This is a dynamic table
-      const newId = await db.staff.add(staffRecord);
-      
-      // Update state
-      setStaff([...staff, { ...staffRecord, id: newId }]);
-      
-      // Reset form
-      setIsAddDialogOpen(false);
-      setNewStaff({
-        nombre: '',
-        rol: '',
-        especialidad: '',
-        email: '',
-        telefono: '',
-      });
-      
-      toast({
-        title: "Personal añadido",
-        description: "El nuevo miembro del personal ha sido añadido exitosamente",
-      });
+      const now = new Date();
+      let updatedStaff;
+
+      if (currentStaff) {
+        // Actualizar existente
+        const staffData = {
+          ...formData,
+          updated_at: now
+        };
+        await db.staff.update(currentStaff.id!, staffData);
+        
+        // Obtener datos actualizados
+        updatedStaff = await db.staff.get(currentStaff.id!);
+        
+        // Actualizar lista
+        setStaff(staff.map(member => 
+          member.id === currentStaff.id ? updatedStaff! : member
+        ));
+        
+        toast({
+          title: 'Personal actualizado',
+          description: 'Los datos del personal han sido actualizados exitosamente',
+        });
+      } else {
+        // Crear nuevo
+        const staffData = {
+          ...formData,
+          created_at: now,
+          updated_at: now
+        };
+        
+        const id = await db.staff.add(staffData);
+        
+        // Obtener registro completo
+        updatedStaff = await db.staff.get(id);
+        
+        if (updatedStaff) {
+          setStaff([...staff, updatedStaff]);
+        }
+        
+        toast({
+          title: 'Personal añadido',
+          description: 'El nuevo miembro del personal ha sido añadido exitosamente',
+        });
+      }
+
+      // Cerrar diálogo
+      setDialogOpen(false);
     } catch (error) {
-      console.error("Error añadiendo personal:", error);
+      console.error('Error guardando personal:', error);
       toast({
-        title: "Error al añadir",
-        description: "No se pudo añadir el nuevo miembro del personal",
-        variant: "destructive",
+        title: 'Error',
+        description: 'No se pudieron guardar los datos del personal',
+        variant: 'destructive',
       });
     }
   };
-  
-  const getCurrentPageData = () => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return staff.slice(startIndex, startIndex + itemsPerPage);
+
+  // Color de badge según rol
+  const getRoleBadgeColor = (role: string) => {
+    switch(role.toLowerCase()) {
+      case 'doctor':
+        return 'bg-blue-100 text-blue-800';
+      case 'enfermero':
+      case 'enfermera':
+        return 'bg-green-100 text-green-800';
+      case 'técnico':
+        return 'bg-purple-100 text-purple-800';
+      case 'administrativo':
+        return 'bg-gray-100 text-gray-800';
+      default:
+        return 'bg-slate-100 text-slate-800';
+    }
+  };
+
+  // Color de badge según estado
+  const getStatusBadgeColor = (status: string) => {
+    switch(status.toLowerCase()) {
+      case 'activo':
+        return 'bg-green-100 text-green-800';
+      case 'inactivo':
+        return 'bg-red-100 text-red-800';
+      case 'vacaciones':
+        return 'bg-blue-100 text-blue-800';
+      case 'licencia':
+        return 'bg-amber-100 text-amber-800';
+      default:
+        return 'bg-slate-100 text-slate-800';
+    }
   };
 
   if (loading) {
     return (
-      <div className="w-full flex justify-center py-10">
-        <div className="h-12 w-12 border-4 border-medical-blue border-t-transparent rounded-full animate-spin"></div>
+      <div className="flex justify-center items-center min-h-[400px]">
+        <div className="h-8 w-8 border-4 border-t-blue-500 border-blue-200 rounded-full animate-spin"></div>
       </div>
     );
   }
 
   return (
-    <div className="w-full">
+    <>
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Personal Médico</h2>
+        <div className="relative w-64">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
+          <Input
+            placeholder="Buscar personal..."
+            className="pl-9"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          {searchTerm && (
+            <button 
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              onClick={() => setSearchTerm('')}
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
         
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-medical-blue hover:bg-medical-blue/90">
-              <UserPlus className="mr-2 h-4 w-4" />
-              Añadir Personal
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle>Añadir Nuevo Personal</DialogTitle>
-              <DialogDescription>
-                Complete los datos del nuevo miembro del personal médico.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="nombre" className="text-right">
-                  Nombre
-                </Label>
-                <Input
-                  id="nombre"
-                  value={newStaff.nombre}
-                  onChange={(e) => setNewStaff({...newStaff, nombre: e.target.value})}
-                  className="col-span-3"
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="rol" className="text-right">
-                  Rol
-                </Label>
-                <Select 
-                  onValueChange={(value) => setNewStaff({...newStaff, rol: value})}
-                  value={newStaff.rol}
-                >
-                  <SelectTrigger className="col-span-3">
-                    <SelectValue placeholder="Seleccionar rol" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Médico">Médico</SelectItem>
-                    <SelectItem value="Enfermero">Enfermero</SelectItem>
-                    <SelectItem value="Técnico">Técnico</SelectItem>
-                    <SelectItem value="Administrador">Administrador</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="especialidad" className="text-right">
-                  Especialidad
-                </Label>
-                <Input
-                  id="especialidad"
-                  value={newStaff.especialidad}
-                  onChange={(e) => setNewStaff({...newStaff, especialidad: e.target.value})}
-                  className="col-span-3"
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="email" className="text-right">
-                  Email
-                </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={newStaff.email}
-                  onChange={(e) => setNewStaff({...newStaff, email: e.target.value})}
-                  className="col-span-3"
-                />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="telefono" className="text-right">
-                  Teléfono
-                </Label>
-                <Input
-                  id="telefono"
-                  value={newStaff.telefono}
-                  onChange={(e) => setNewStaff({...newStaff, telefono: e.target.value})}
-                  className="col-span-3"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                Cancelar
-              </Button>
-              <Button 
-                onClick={handleAddStaff} 
-                className="bg-medical-blue hover:bg-medical-blue/90"
-                disabled={!newStaff.nombre || !newStaff.rol}
-              >
-                Guardar
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button onClick={handleNew} className="bg-medical-teal hover:bg-medical-teal/90">
+          <UserPlus className="mr-2 h-4 w-4" />
+          Agregar Personal
+        </Button>
       </div>
       
-      <div className="border rounded-md">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nombre</TableHead>
-              <TableHead>Rol</TableHead>
-              <TableHead>Especialidad</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Teléfono</TableHead>
-              <TableHead>Estado</TableHead>
-              <TableHead className="text-right">Acciones</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {getCurrentPageData().map((person) => (
-              <TableRow key={person.id}>
-                <TableCell className="font-medium">{person.nombre}</TableCell>
-                <TableCell>{person.rol}</TableCell>
-                <TableCell>{person.especialidad}</TableCell>
-                <TableCell>{person.email}</TableCell>
-                <TableCell>{person.telefono}</TableCell>
+      <Table>
+        <TableCaption>Lista del personal médico y administrativo</TableCaption>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Nombre</TableHead>
+            <TableHead>Rol</TableHead>
+            <TableHead className="hidden md:table-cell">Especialidad</TableHead>
+            <TableHead className="hidden md:table-cell">Email</TableHead>
+            <TableHead className="hidden md:table-cell">Teléfono</TableHead>
+            <TableHead>Estado</TableHead>
+            <TableHead className="text-right">Acciones</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filteredStaff.length > 0 ? (
+            filteredStaff.map((member) => (
+              <TableRow key={member.id}>
+                <TableCell className="font-medium">{member.nombre}</TableCell>
                 <TableCell>
-                  <span 
-                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      person.estado === 'Activo' 
-                        ? 'bg-green-100 text-green-800' 
-                        : 'bg-red-100 text-red-800'
-                    }`}
-                  >
-                    {person.estado}
-                  </span>
+                  <Badge variant="outline" className={getRoleBadgeColor(member.rol)}>
+                    {member.rol}
+                  </Badge>
                 </TableCell>
-                <TableCell className="text-right">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" className="h-8 w-8 p-0">
-                        <span className="sr-only">Abrir menú</span>
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => person.id && handleEditStaff(person.id)}>
-                        <Edit className="mr-2 h-4 w-4" />
-                        <span>Editar</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem 
-                        className="text-red-600"
-                        onClick={() => person.id && handleDeleteStaff(person.id)}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        <span>Eliminar</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                <TableCell className="hidden md:table-cell">{member.especialidad}</TableCell>
+                <TableCell className="hidden md:table-cell">{member.email}</TableCell>
+                <TableCell className="hidden md:table-cell">{member.telefono}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" className={getStatusBadgeColor(member.estado)}>
+                    {member.estado}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-right space-x-2">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    onClick={() => handleEdit(member)}
+                    className="h-8 w-8 text-blue-600"
+                  >
+                    <Pencil size={16} />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    onClick={() => handleDelete(member.id)}
+                    className="h-8 w-8 text-red-600"
+                  >
+                    <Trash2 size={16} />
+                  </Button>
                 </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between space-x-2 py-4">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Anterior
-          </Button>
-          <span className="text-sm text-gray-600">
-            Página {currentPage} de {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-            disabled={currentPage === totalPages}
-          >
-            Siguiente
-            <ChevronRight className="h-4 w-4 ml-1" />
-          </Button>
-        </div>
-      )}
-    </div>
+            ))
+          ) : (
+            <TableRow>
+              <TableCell colSpan={7} className="text-center py-6 text-gray-500">
+                {searchTerm 
+                  ? "No se encontraron resultados para su búsqueda" 
+                  : "No hay personal registrado"}
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+
+      {/* Diálogo para agregar/editar personal */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>
+              {currentStaff ? 'Editar Personal' : 'Agregar Nuevo Personal'}
+            </DialogTitle>
+            <DialogDescription>
+              {currentStaff 
+                ? 'Modifique los datos del personal según sea necesario' 
+                : 'Complete la información para agregar un nuevo miembro del personal'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="nombre" className="text-right">
+                Nombre*
+              </Label>
+              <Input
+                id="nombre"
+                name="nombre"
+                value={formData.nombre}
+                onChange={handleInputChange}
+                className="col-span-3"
+                required
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="rol" className="text-right">
+                Rol*
+              </Label>
+              <Select 
+                value={formData.rol} 
+                onValueChange={(value) => handleSelectChange('rol', value)}
+              >
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="Seleccione un rol" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Doctor">Doctor</SelectItem>
+                  <SelectItem value="Enfermero">Enfermero/a</SelectItem>
+                  <SelectItem value="Técnico">Técnico</SelectItem>
+                  <SelectItem value="Administrativo">Administrativo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="especialidad" className="text-right">
+                Especialidad
+              </Label>
+              <Input
+                id="especialidad"
+                name="especialidad"
+                value={formData.especialidad}
+                onChange={handleInputChange}
+                className="col-span-3"
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="email" className="text-right">
+                Email*
+              </Label>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                value={formData.email}
+                onChange={handleInputChange}
+                className="col-span-3"
+                required
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="telefono" className="text-right">
+                Teléfono
+              </Label>
+              <Input
+                id="telefono"
+                name="telefono"
+                value={formData.telefono}
+                onChange={handleInputChange}
+                className="col-span-3"
+              />
+            </div>
+            
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="estado" className="text-right">
+                Estado
+              </Label>
+              <Select 
+                value={formData.estado} 
+                onValueChange={(value) => handleSelectChange('estado', value)}
+              >
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="Seleccione un estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Activo">Activo</SelectItem>
+                  <SelectItem value="Inactivo">Inactivo</SelectItem>
+                  <SelectItem value="Vacaciones">Vacaciones</SelectItem>
+                  <SelectItem value="Licencia">Licencia</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit" onClick={handleSave} className="bg-medical-blue hover:bg-medical-blue/90">
+              {currentStaff ? 'Guardar Cambios' : 'Agregar Personal'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 
