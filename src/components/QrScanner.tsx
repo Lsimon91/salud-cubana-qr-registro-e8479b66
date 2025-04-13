@@ -7,18 +7,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
-import { Loader2, Check, QrCode, UserPlus, Search, User, Calendar, CreditCard } from 'lucide-react';
+import { Loader2, Check, QrCode, UserPlus, Search } from 'lucide-react';
 import { db } from '@/db/localDatabase';
-
-// Interfaces para los datos extraídos del carnet
-interface CubanIDData {
-  nombre: string;
-  apellidos: string;
-  identityId: string;
-  codigoValidacion: string;
-  fechaNacimiento: string;
-  genero: 'Masculino' | 'Femenino';
-}
 
 const QrScanner = () => {
   const navigate = useNavigate();
@@ -27,71 +17,13 @@ const QrScanner = () => {
   const [scanStatus, setScanStatus] = useState<'idle' | 'scanning' | 'success' | 'error'>('idle');
   const [manualId, setManualId] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [idData, setIdData] = useState<CubanIDData | null>(null);
 
   // Reiniciar el estado al montar el componente
   useEffect(() => {
     setScanResult(null);
     setScanStatus('idle');
     setIsScanning(true);
-    setIdData(null);
   }, []);
-
-  // Función para extraer datos del carnet cubano
-  const extractCubanIDData = (qrText: string): CubanIDData | null => {
-    try {
-      // Patrón para extraer los datos del formato del carnet cubano
-      // Asumimos que el formato es:
-      // Nombre: [nombre]
-      // Apellidos: [apellidos]
-      // Número de identidad: [id]
-      // Código de validación: [código]
-      
-      const nombreMatch = qrText.match(/Nombre: (.+?)(\n|$)/);
-      const apellidosMatch = qrText.match(/Apellidos: (.+?)(\n|$)/);
-      const idMatch = qrText.match(/Número de identidad: (.+?)(\n|$)/);
-      const codigoMatch = qrText.match(/Código de validación: (.+?)(\n|$)/);
-
-      if (!nombreMatch || !apellidosMatch || !idMatch) {
-        console.error('Formato de QR no reconocido:', qrText);
-        return null;
-      }
-
-      const nombre = nombreMatch[1].trim();
-      const apellidos = apellidosMatch[1].trim();
-      const identityId = idMatch[1].trim();
-      const codigoValidacion = codigoMatch ? codigoMatch[1].trim() : '';
-
-      // Determinar género - si el séptimo dígito es par: mujer, impar: hombre
-      const septimoDigito = parseInt(identityId.charAt(6), 10);
-      const genero = septimoDigito % 2 === 0 ? 'Femenino' : 'Masculino';
-
-      // Extraer fecha de nacimiento (primeros 6 dígitos en formato YYMMDD)
-      if (identityId.length >= 6) {
-        const yearPrefix = parseInt(identityId.substring(0, 2), 10) >= 0 && 
-                          parseInt(identityId.substring(0, 2), 10) <= 23 ? '20' : '19';
-        const year = yearPrefix + identityId.substring(0, 2);
-        const month = identityId.substring(2, 4);
-        const day = identityId.substring(4, 6);
-        
-        const fechaNacimiento = `${day}/${month}/${year}`;
-        
-        return {
-          nombre,
-          apellidos,
-          identityId,
-          codigoValidacion,
-          fechaNacimiento,
-          genero
-        };
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Error al extraer datos del carnet:', error);
-      return null;
-    }
-  };
 
   // Manejar el resultado del escaneo
   const handleScanResult = async (result: string | null) => {
@@ -99,44 +31,31 @@ const QrScanner = () => {
       setScanResult(result);
       setScanStatus('success');
       setIsScanning(false);
+      toast.success('Código QR escaneado con éxito');
       
-      const extractedData = extractCubanIDData(result);
-      if (extractedData) {
-        setIdData(extractedData);
-        toast.success('Código QR escaneado con éxito');
+      try {
+        // Verificar si el paciente existe en la base de datos
+        const patient = await db.patients.where('identity_id').equals(result).first();
         
-        try {
-          // Verificar si el paciente existe en la base de datos
-          const patient = await db.patients.where('identity_id').equals(extractedData.identityId).first();
-          
-          // Registrar actividad
-          const userId = localStorage.getItem('userId');
-          const userName = localStorage.getItem('userName');
-          
-          if (userId && userName) {
-            await db.activityLogs.add({
-              action: 'Escaneo de código QR',
-              user_id: userId,
-              user_name: userName,
-              details: `Código QR ${extractedData.identityId} escaneado ${patient ? 'paciente encontrado' : 'paciente no encontrado'}`,
-              created_at: new Date()
-            });
-          }
-          
-          // Si el paciente no existe, lo redirigimos a crear uno con los datos pre-completados
-          if (!patient) {
-            toast.info('Paciente no encontrado. Puedes crear uno nuevo con los datos escaneados.');
-          } else {
-            // Navegar a la página del paciente
-            navigate(`/paciente/${extractedData.identityId}`);
-          }
-        } catch (error) {
-          console.error('Error al procesar el código QR:', error);
-          toast.error('Error al procesar el código QR');
+        // Registrar actividad
+        const userId = localStorage.getItem('userId');
+        const userName = localStorage.getItem('userName');
+        
+        if (userId && userName) {
+          await db.activityLogs.add({
+            action: 'Escaneo de código QR',
+            user_id: userId,
+            user_name: userName,
+            details: `Código QR ${result} escaneado ${patient ? 'paciente encontrado' : 'paciente no encontrado'}`,
+            created_at: new Date()
+          });
         }
-      } else {
-        toast.error('Formato de QR no reconocido');
-        setScanStatus('error');
+        
+        // Navegar a la página del paciente
+        navigate(`/paciente/${result}`);
+      } catch (error) {
+        console.error('Error al procesar el código QR:', error);
+        toast.error('Error al procesar el código QR');
       }
     }
   };
@@ -158,31 +77,6 @@ const QrScanner = () => {
     setIsSearching(true);
     
     try {
-      // Extraer datos del ID manual si cumple con el formato cubano
-      if (manualId.length === 11) {
-        // Determinar género
-        const septimoDigito = parseInt(manualId.charAt(6), 10);
-        const genero = septimoDigito % 2 === 0 ? 'Femenino' : 'Masculino';
-
-        // Extraer fecha de nacimiento
-        const yearPrefix = parseInt(manualId.substring(0, 2), 10) >= 0 && 
-                          parseInt(manualId.substring(0, 2), 10) <= 23 ? '20' : '19';
-        const year = yearPrefix + manualId.substring(0, 2);
-        const month = manualId.substring(2, 4);
-        const day = manualId.substring(4, 6);
-        
-        const fechaNacimiento = `${day}/${month}/${year}`;
-
-        setIdData({
-          nombre: '',
-          apellidos: '',
-          identityId: manualId,
-          codigoValidacion: '',
-          fechaNacimiento,
-          genero
-        });
-      }
-      
       // Registrar actividad
       const userId = localStorage.getItem('userId');
       const userName = localStorage.getItem('userName');
@@ -212,14 +106,11 @@ const QrScanner = () => {
     setScanResult(null);
     setScanStatus('idle');
     setIsScanning(true);
-    setIdData(null);
   };
 
   // Crear nuevo paciente
   const handleCreateNewPatient = () => {
-    if (idData) {
-      navigate(`/paciente/new-patient?id=${idData.identityId}&nombre=${idData.nombre}&apellidos=${idData.apellidos}&genero=${idData.genero}&fechaNacimiento=${idData.fechaNacimiento}`);
-    } else if (scanResult) {
+    if (scanResult) {
       navigate(`/paciente/new-patient?id=${scanResult}`);
     } else {
       navigate('/paciente/new-patient');
@@ -239,7 +130,7 @@ const QrScanner = () => {
             <div className="p-4 bg-blue-50 border-b border-blue-100">
               <h3 className="text-lg font-medium text-blue-800 mb-1">Escáner de Código QR</h3>
               <p className="text-sm text-blue-600">
-                Alinee el código QR del carnet de identidad con la cámara para escanearlo
+                Alinee el código QR del paciente con la cámara para escanearlo
               </p>
             </div>
             
@@ -281,90 +172,32 @@ const QrScanner = () => {
               </div>
             )}
             
-            {!isScanning && idData && (
+            {!isScanning && scanResult && (
               <div className="p-6 flex flex-col items-center justify-center">
                 <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mb-4">
                   <Check className="h-8 w-8 text-green-600" />
                 </div>
-                <h3 className="text-lg font-medium mb-4 text-center">Carnet escaneado correctamente</h3>
-                
-                <div className="w-full space-y-3 mb-6">
-                  <div className="flex items-center space-x-2">
-                    <User className="h-5 w-5 text-gray-500" />
-                    <div>
-                      <p className="text-sm text-gray-500">Nombre completo</p>
-                      <p className="font-medium">{idData.nombre} {idData.apellidos}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <CreditCard className="h-5 w-5 text-gray-500" />
-                    <div>
-                      <p className="text-sm text-gray-500">Número de identidad</p>
-                      <p className="font-medium">{idData.identityId}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <Calendar className="h-5 w-5 text-gray-500" />
-                    <div>
-                      <p className="text-sm text-gray-500">Fecha de nacimiento</p>
-                      <p className="font-medium">{idData.fechaNacimiento}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <User className="h-5 w-5 text-gray-500" />
-                    <div>
-                      <p className="text-sm text-gray-500">Género</p>
-                      <p className="font-medium">{idData.genero}</p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="flex space-x-4 w-full">
-                  <Button onClick={handleReset} variant="outline" className="flex-1">
-                    Escanear otro
-                  </Button>
-                  <Button 
-                    onClick={handleCreateNewPatient}
-                    className="flex-1 bg-medical-teal hover:bg-medical-teal/90"
-                  >
-                    <UserPlus className="mr-2 h-4 w-4" />
-                    Crear Paciente
-                  </Button>
-                </div>
-              </div>
-            )}
-            
-            {!isScanning && scanResult && !idData && (
-              <div className="p-6 flex flex-col items-center justify-center">
-                <div className="w-16 h-16 rounded-full bg-yellow-100 flex items-center justify-center mb-4">
-                  <QrCode className="h-8 w-8 text-yellow-600" />
-                </div>
-                <h3 className="text-lg font-medium mb-2 text-center">Código QR escaneado</h3>
+                <h3 className="text-lg font-medium mb-2 text-center">Código QR escaneado correctamente</h3>
                 <p className="text-sm text-gray-500 mb-4 text-center">
-                  El formato del QR no corresponde a un carnet de identidad cubano
+                  ID: {scanResult}
                 </p>
-                <div className="flex space-x-4 w-full">
-                  <Button onClick={handleReset} variant="outline" className="flex-1">
+                <div className="flex space-x-4">
+                  <Button onClick={handleReset} variant="outline">
                     Escanear otro
                   </Button>
                 </div>
               </div>
             )}
             
-            {isScanning && (
-              <div className="p-4 flex flex-col items-center border-t">
-                <Button 
-                  onClick={handleCreateNewPatient}
-                  className="w-full bg-medical-teal hover:bg-medical-teal/90 mt-2"
-                >
-                  <UserPlus className="mr-2 h-4 w-4" />
-                  Registrar Nuevo Paciente
-                </Button>
-              </div>
-            )}
+            <div className="p-4 flex flex-col items-center border-t">
+              <Button 
+                onClick={handleCreateNewPatient}
+                className="w-full bg-medical-teal hover:bg-medical-teal/90 mt-2"
+              >
+                <UserPlus className="mr-2 h-4 w-4" />
+                Registrar Nuevo Paciente
+              </Button>
+            </div>
           </CardContent>
         </TabsContent>
         

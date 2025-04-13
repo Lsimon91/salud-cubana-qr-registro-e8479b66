@@ -14,7 +14,6 @@ import ProfilePage from "./pages/ProfilePage";
 import UsersPage from "./pages/UsersPage";
 import PatientPage from "./pages/PatientPage";
 import LoginPage from "./pages/LoginPage";
-import AdminPage from "./pages/AdminPage";
 
 const queryClient = new QueryClient();
 
@@ -98,14 +97,6 @@ const App = () => (
             element={
               <AdminRoute>
                 <UsersPage />
-              </AdminRoute>
-            } 
-          />
-          <Route 
-            path="/admin" 
-            element={
-              <AdminRoute>
-                <AdminPage />
               </AdminRoute>
             } 
           />
