@@ -12,22 +12,9 @@ import {
   UserX, 
   UserPlus 
 } from 'lucide-react';
-import { db } from '@/db/localDatabase';
+import { db, Patient } from '@/db/localDatabase';
 
 // Interfaces
-interface PatientData {
-  identity_id: string;
-  name: string;
-  birth_date: string;
-  gender: string;
-  address: string;
-  phone?: string;
-  email?: string;
-  blood_type?: string;
-  allergies: string[] | [];
-  age?: number;
-}
-
 interface ScannedPatientData {
   id: string;
   nombre: string;
@@ -43,7 +30,7 @@ const QrScanner = () => {
   const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [patientExists, setPatientExists] = useState(false);
-  const [patient, setPatient] = useState<PatientData | null>(null);
+  const [patient, setPatient] = useState<Patient | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -163,7 +150,8 @@ const QrScanner = () => {
             email: patientData.email || '',
             blood_type: '',
             allergies: [],
-            age: age
+            created_at: new Date(),
+            updated_at: new Date()
           };
           
           setPatient(newPatient);
@@ -199,23 +187,8 @@ const QrScanner = () => {
       const userId = localStorage.getItem('userId') || 'unknown';
       const userName = localStorage.getItem('userName') || 'Usuario desconocido';
       
-      // Preparar objeto del paciente para guardar
-      const newPatient = {
-        identity_id: patient.identity_id,
-        name: patient.name,
-        birth_date: patient.birth_date,
-        gender: patient.gender,
-        address: patient.address,
-        phone: patient.phone || '',
-        email: patient.email || '',
-        blood_type: patient.blood_type || '',
-        allergies: Array.isArray(patient.allergies) ? patient.allergies : [],
-        created_at: new Date(),
-        updated_at: new Date()
-      };
-      
       // Guardar el paciente en la base de datos
-      const patientId = await db.patients.add(newPatient);
+      const patientId = await db.patients.add(patient);
       
       // Registrar actividad
       await db.activityLogs.add({

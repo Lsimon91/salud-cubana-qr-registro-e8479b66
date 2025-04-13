@@ -50,12 +50,25 @@ export interface ActivityLog {
   created_at: Date;
 }
 
+export interface StaffMember {
+  id?: number;
+  nombre: string;
+  rol: string;
+  especialidad: string;
+  email: string;
+  telefono: string;
+  estado: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
 // Definir la clase de la base de datos
 class MedicalDB extends Dexie {
   patients!: Table<Patient, number>;
   medicalRecords!: Table<MedicalRecord, number>;
   users!: Table<User, string>;
   activityLogs!: Table<ActivityLog, number>;
+  staff!: Table<StaffMember, number>;
 
   constructor() {
     super('MedicalDB');
@@ -63,7 +76,8 @@ class MedicalDB extends Dexie {
       patients: '++id, identity_id, name, birth_date',
       medicalRecords: '++id, patient_id, date, doctor_id',
       users: 'id, email, role',
-      activityLogs: '++id, user_id, created_at'
+      activityLogs: '++id, user_id, created_at',
+      staff: '++id, rol, email'
     });
   }
 }
